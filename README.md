@@ -83,8 +83,13 @@ publishing the result to Releases. To build one locally instead:
 pip install -e ".[dev]"
 python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
 # copy the printed path, then:
-pyinstaller --onefile --name add-frontmatter --add-binary "<that path>;." src/add_frontmatter/cli.py
+pyinstaller --onefile --name add-frontmatter --paths src --add-binary "<that path>;." src/run_add_frontmatter.py
 ```
+
+(Built from `src/run_add_frontmatter.py`, a thin wrapper — PyInstaller needs
+a plain top-level script to build from, and running `cli.py` itself that way
+breaks its internal relative imports. `--paths src` is what lets the
+wrapper's `import add_frontmatter.cli` find the package.)
 
 The result is `dist/add-frontmatter.exe` — fully self-contained, ffmpeg and
 all.

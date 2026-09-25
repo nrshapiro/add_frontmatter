@@ -40,11 +40,18 @@ jobs:
           echo "Bundling ffmpeg from: $ffmpegPath"
 
       - name: Build add-frontmatter.exe
+        # Built from src/run_add_frontmatter.py, not cli.py directly:
+        # PyInstaller runs its target as a standalone top-level script, and
+        # cli.py uses relative imports (`from .config import ...`) that only
+        # resolve when add_frontmatter is imported as a package. --paths src
+        # puts src/ on sys.path so `import add_frontmatter.cli` in the
+        # wrapper finds the package and those relative imports work.
         shell: pwsh
         run: |
           pyinstaller --onefile --name add-frontmatter `
+            --paths src `
             --add-binary "$env:FFMPEG_PATH;." `
-            src/add_frontmatter/cli.py
+            src/run_add_frontmatter.py
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
