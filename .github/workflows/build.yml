@@ -13,6 +13,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write  # needed for the "Attach to release" step to upload assets
     steps:
       - uses: actions/checkout@v4
 
