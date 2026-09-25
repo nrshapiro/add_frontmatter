@@ -100,6 +100,9 @@ all.
 add-frontmatter
 ```
 
+Forgot a flag? `add-frontmatter --help` (or `-h`) prints the full list with
+a description of each one.
+
 `--target`, `--frontmatter`, and `--output-dir` can come from three places.
 If you pass one on the command line, that's used. Otherwise, it falls back
 to whatever you saved with `--configure`. If neither is set, it falls back
