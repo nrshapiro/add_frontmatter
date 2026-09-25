@@ -95,9 +95,11 @@ all.
 add-frontmatter
 ```
 
-Precedence for `--target`/`--frontmatter`/`--output-dir` is: command-line
-flag > your saved config (`--configure`) > Neil's own hardcoded defaults
-(`D:\usr6\spsvideos\...` — not meant for anyone else to rely on).
+`--target`, `--frontmatter`, and `--output-dir` can come from three places.
+If you pass one on the command line, that's used. Otherwise, it falls back
+to whatever you saved with `--configure`. If neither is set, it falls back
+to Neil's own hardcoded folders (`D:\usr6\spsvideos\...`) — meant only for
+his machine, not a useful default for anyone else.
 
 ```bash
 add-frontmatter --configure                      # one-time interactive setup
