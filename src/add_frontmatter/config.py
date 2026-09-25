@@ -35,12 +35,24 @@ def save_config(target: str, frontmatter: str, output_dir: str | None) -> Path:
     return CONFIG_FILE
 
 
-def _prompt_path(label: str, must_exist_as: str) -> str:
+def _prompt_path(label: str, must_exist_as: str, current: str | None = None) -> str:
     """Ask for a path, stripping stray quotes (common when dragging a
     folder/file into the terminal instead of typing it), and keep asking
-    until it actually exists."""
+    until it actually exists.
+
+    If `current` is given and is still a valid path of the right kind, it's
+    shown in [brackets] and pressing Enter keeps it. If `current` is no
+    longer valid (moved/deleted), it's not offered as a default -- you have
+    to type a real path, same as first-time setup."""
+    current_is_valid = bool(current) and (
+        (must_exist_as == "dir" and Path(current).is_dir())
+        or (must_exist_as == "file" and Path(current).is_file())
+    )
+    suffix = f" [{current}]" if current_is_valid else ""
     while True:
-        raw = input(label).strip().strip('"').strip("'")
+        raw = input(f"{label}{suffix}: ").strip().strip('"').strip("'")
+        if not raw and current_is_valid:
+            return current
         p = Path(raw)
         if must_exist_as == "dir" and p.is_dir():
             return raw
@@ -50,17 +62,28 @@ def _prompt_path(label: str, must_exist_as: str) -> str:
 
 
 def run_configure() -> None:
-    """Interactive one-time setup wizard: asks for this user's own folders
-    and saves them so future runs need no flags at all."""
+    """Interactive setup wizard: asks for this user's own folders and saves
+    them so future runs need no flags at all. Re-running this later shows
+    whatever's currently saved as the default (Enter keeps it), so you can
+    tweak just one value without retyping the others."""
     print("Let's set up your defaults for add-frontmatter.")
     print("(Tip: you can drag a folder or file into this window instead of typing the path.)\n")
 
-    target = _prompt_path("Folder containing the MP4 files to process: ", "dir")
-    frontmatter = _prompt_path("Path to the frontmatter MP4 to prepend: ", "file")
-    output_raw = input(
-        "Output folder (press Enter to just use an 'output' subfolder inside the folder above): "
-    ).strip().strip('"').strip("'")
-    output_dir = output_raw or None
+    current = load_config()
+    if current:
+        print("Current values are shown in [brackets] -- press Enter to keep one as-is.\n")
+
+    target = _prompt_path(
+        "Folder containing the MP4 files to process", "dir", current.get("target")
+    )
+    frontmatter = _prompt_path(
+        "Path to the frontmatter MP4 to prepend", "file", current.get("frontmatter")
+    )
+
+    current_output = current.get("output_dir")
+    output_suffix = f" [{current_output}]" if current_output else " [output subfolder]"
+    output_raw = input(f"Output folder{output_suffix}: ").strip().strip('"').strip("'")
+    output_dir = output_raw or current_output or None
 
     path = save_config(target, frontmatter, output_dir)
     print(f"\nSaved to {path}")
