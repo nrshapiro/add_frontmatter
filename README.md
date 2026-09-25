@@ -12,7 +12,7 @@ Each output file is saved as:
 
 ---
 
-## For anyone just running this tool (e.g. video-editing associates)
+## For anyone just running this tool
 
 **No Python install needed.** Grab the latest `add-frontmatter.exe` from this
 repo's [Releases page](../../releases/latest) — it's a single self-contained
@@ -50,7 +50,7 @@ folders, or override just this once with `--target`/`--frontmatter` flags
 
 ---
 
-## For development (Neil, or anyone editing the code)
+## For development
 
 ### Requirements
 
