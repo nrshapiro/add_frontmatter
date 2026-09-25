@@ -1,7 +1,8 @@
 # add-frontmatter
 
 Prepends a "frontmatter" MP4 (e.g. a club opening title) onto every MP4 in a
-target folder, using [ffmpeg](https://ffmpeg.org/).
+target folder. Powered by [ffmpeg](https://ffmpeg.org/) under the hood — no
+separate install needed, it's bundled into the download below.
 
 Each output file is saved as:
 
