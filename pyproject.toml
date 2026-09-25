@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "add-frontmatter"
+version = "1.0.0"
+description = "Prepend a frontmatter MP4 onto every MP4 in a folder, using ffmpeg."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Neil Shapiro" }
+]
+dependencies = [
+    "imageio-ffmpeg>=0.4.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pyinstaller"]
+
+[project.scripts]
+add-frontmatter = "add_frontmatter.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

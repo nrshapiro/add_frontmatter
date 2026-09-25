@@ -1,0 +1,57 @@
+name: Build Windows exe
+
+# Builds a standalone add-frontmatter.exe on every push to main and on every
+# version tag, and attaches it to a GitHub Release for tags. No install of
+# Python, pip, or this package is needed on the machine that runs the exe —
+# everything (including a real ffmpeg binary) is bundled inside it.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+          pip install pyinstaller
+
+      - name: Download and cache the ffmpeg binary to bundle
+        # Runs the tool's own imageio-ffmpeg dependency once, just to force
+        # the download, then locates the cached exe so PyInstaller can bundle
+        # it directly into the .exe. This means the associate's machine never
+        # needs its own internet connection just to get ffmpeg.
+        shell: pwsh
+        run: |
+          $ffmpegPath = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
+          echo "FFMPEG_PATH=$ffmpegPath" >> $env:GITHUB_ENV
+          echo "Bundling ffmpeg from: $ffmpegPath"
+
+      - name: Build add-frontmatter.exe
+        shell: pwsh
+        run: |
+          pyinstaller --onefile --name add-frontmatter `
+            --add-binary "$env:FFMPEG_PATH;." `
+            src/add_frontmatter/cli.py
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: add-frontmatter-windows
+          path: dist/add-frontmatter.exe
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/add-frontmatter.exe
