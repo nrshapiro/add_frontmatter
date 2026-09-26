@@ -7,6 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from . import __version__
 from .config import CONFIG_FILE, load_config, run_configure
 from .core import (
     FfmpegNotFoundError, already_processed, find_target_mp4s, get_ffmpeg_path, process_video,
@@ -24,6 +25,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="add-frontmatter",
         description="Prepend a frontmatter MP4 onto every MP4 in a folder.",
+    )
+    ap.add_argument(
+        "--version", action="version", version=f"add-frontmatter {__version__}",
     )
     ap.add_argument(
         "--configure", action="store_true",
@@ -66,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         run_configure()
         return 0
 
+    print(f"add-frontmatter {__version__}")
     cfg = load_config()
 
     # Precedence: command-line flag > saved config > hardcoded default.

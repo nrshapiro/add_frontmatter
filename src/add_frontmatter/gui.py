@@ -21,11 +21,20 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+from . import __version__
 from .config import load_config, save_config
 from .core import FfmpegNotFoundError, already_processed, get_ffmpeg_path, process_video
 from .trim import DEFAULT_TRIGGER, maybe_trim
 
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+
+APP_DESCRIPTION = (
+    "Automates adding a lead-in “frontmatter” video (e.g. a logo) to the front "
+    "of a Zoom-recorded meeting video (both MP4). If a Zoom chat log with the same "
+    f"base name is found next to a video, it looks for a chat line “{DEFAULT_TRIGGER}” "
+    "(case-insensitive) and trims the video to that point before prepending the "
+    "frontmatter. Processes as many files as you add, in one batch."
+)
 
 
 def _resource_path(name: str) -> Path:
@@ -42,9 +51,9 @@ def _resource_path(name: str) -> Path:
 class FrontmatterGUI:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("SPS Add Frontmatter")
-        self.root.geometry("640x520")
-        self.root.minsize(520, 420)
+        self.root.title(f"SPS Add Frontmatter — v{__version__}")
+        self.root.geometry("640x580")
+        self.root.minsize(520, 460)
 
         self.cfg = load_config()
         self.frontmatter_path = tk.StringVar(value=self.cfg.get("frontmatter", ""))
@@ -73,11 +82,25 @@ class FrontmatterGUI:
 
         title_frame = ttk.Frame(header)
         title_frame.pack(side="left", fill="x", expand=True)
-        ttk.Label(title_frame, text="Add Frontmatter", font=("Segoe UI", 16, "bold")).pack(anchor="w")
+        title_row = ttk.Frame(title_frame)
+        title_row.pack(anchor="w", fill="x")
+        ttk.Label(title_row, text="Add Frontmatter", font=("Segoe UI", 16, "bold")).pack(side="left")
+        version_label = ttk.Label(
+            title_row, text=f"v{__version__}", foreground="#0645AD", cursor="hand2",
+        )
+        version_label.pack(side="left", padx=(8, 0), pady=(4, 0))
+        version_label.bind("<Button-1>", lambda _e: self._show_about())
         ttk.Label(
             title_frame,
             text="Click “Add Files…” to choose MP4s, then click Process.",
         ).pack(anchor="w")
+        ttk.Label(
+            title_frame,
+            text=APP_DESCRIPTION,
+            wraplength=560,
+            justify="left",
+            foreground="#444444",
+        ).pack(anchor="w", pady=(6, 0))
 
         settings_frame = ttk.LabelFrame(self.root, text="Settings", padding=8)
         settings_frame.pack(fill="x", padx=12, pady=(0, 6))
@@ -187,6 +210,13 @@ class FrontmatterGUI:
             "First-time setup",
             "Before processing, choose your frontmatter MP4 (and optionally an "
             "output folder) using the Settings panel above.",
+        )
+
+    def _show_about(self) -> None:
+        messagebox.showinfo(
+            "About Add Frontmatter",
+            f"Add Frontmatter — v{__version__}\n\n{APP_DESCRIPTION}\n\n"
+            "github.com/nrshapiro/add_frontmatter",
         )
 
     # --------------------------------------------------------- logging ----

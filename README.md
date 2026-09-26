@@ -47,6 +47,11 @@ your opening clip (only needs doing once — it's remembered after that),
 then **Add Files…** to pick the videos you want to process, then
 **Process**.
 
+The app's what-it-does blurb and version number are printed right in the
+window, next to the "Add Frontmatter" title — click the version number for
+an About box with the same text. The CLI shows its version too, at the top
+of every run (or on its own via `add-frontmatter --version`).
+
 ### Command line (Windows only)
 
 **No Python install needed.** Grab `add-frontmatter.exe` from
@@ -295,14 +300,42 @@ Releases have this requirement at all — ffmpeg is already inside them.
 
 ## Releasing a new version
 
-Tag a commit `vX.Y.Z` and push the tag — GitHub Actions builds all three
-artifacts (CLI exe, Windows GUI exe, Mac GUI app) and attaches them to a new
-Release automatically:
+Before tagging, bump the version number in two places so it matches the tag
+you're about to create (nothing does this automatically):
+
+- `src/add_frontmatter/__init__.py` — `__version__ = "X.Y.Z"` (this is what
+  the GUI's title bar/About box and the CLI's `--version` actually show)
+- `pyproject.toml` — `version = "X.Y.Z"`
+
+Then tag that commit `vX.Y.Z` and push the tag — GitHub Actions builds all
+three artifacts (CLI exe, Windows GUI exe, Mac GUI app) and attaches them to
+a new Release automatically:
 
 ```bash
 git tag v1.1.0
 git push origin v1.1.0
 ```
+
+When creating the release on GitHub, the title and body both accept
+Markdown — see the note in "Making a habit of release notes" below.
+
+### Making a habit of release notes
+
+The release **title** is shown in the Releases list and reads well as one
+line: `vX.Y.Z — <what changed, in a few words>` (e.g. `v2.1.1 — Fix
+auto-trim under-trimming the lead-in by ~19 seconds`).
+
+The release **body** renders full GitHub-flavored Markdown, so for
+anything beyond a couple of sentences it's worth using it:
+
+- `- ` at the start of a line makes a bullet list (what actually rendered
+  for v2.1.1's notes)
+- `` `backticks` `` for filenames, flags, and code
+- `**bold**` to call out a breaking change or something to pay attention to
+- A blank line between paragraphs (Markdown ignores single line breaks)
+
+For a one- or two-line fix, plain sentences are fine as-is — no need to
+force markup where it doesn't add anything.
 
 ## Development / tests
 
