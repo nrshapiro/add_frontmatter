@@ -244,14 +244,19 @@ marker in it, it's trimmed automatically. What's worth knowing:
   exactly one `.txt` file is sitting there and neither of the above matched,
   that one is used. No match found at all → trimming is skipped for that
   video, nothing else changes.
-- **Finding when the video actually started.** Needed to convert the
-  marker's chat timestamp into a trim offset. Tried in order: (1) Zoom's own
-  `GMT<date>-<time>` timestamp in the *video's own filename* — the most
-  reliable, since it survives someone renaming the file afterward (e.g.
-  appending a resolution suffix) as long as that leading `GMT...` token
-  stays intact; (2) the containing folder's name, if it matches Zoom's
-  local-recording convention (`YYYY-MM-DD HH.MM.SS Meeting Name`); (3) the
-  video's own embedded `creation_time` metadata, as a last resort.
+- **Computing the trim offset.** Zoom's chat-log timestamps are real
+  wall-clock time-of-day (e.g. `22:35:02`, not "35 minutes into the
+  meeting"). The offset is the difference between the marker's timestamp
+  and the chat log's own *first* timestamped line — both read off the same
+  clock, in the chat log itself. This deliberately never looks at the
+  video's filename, containing folder, or embedded metadata for this: the
+  video's Zoom-assigned filename timestamp is UTC, while the chat log is
+  the host's local time, and cross-referencing those two clocks directly
+  would silently introduce a multi-hour error. Anchoring entirely within the
+  chat log sidesteps that. (The one edge case: if someone was chatting well
+  before the host actually started recording, the trim will be a bit
+  shorter than ideal, never longer than it should be — safe in the
+  direction that matters.)
 - **The trim itself** is a fast, lossless stream copy (same as the rest of
   this tool's philosophy of never re-encoding picture it doesn't have to) —
   snapped to the nearest keyframe, so it may start a second or two before
