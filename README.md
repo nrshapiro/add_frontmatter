@@ -27,9 +27,9 @@ Comes in two forms, sharing the same underlying video logic:
 [Releases page](../../releases/latest) (or the **Actions** tab for the
 newest build from `main`, if there isn't a tagged release yet):
 
-- **Windows:** `SPS-Add-Frontmatter-Windows` → `SPS-Add-Frontmatter.exe`
-- **Mac:** `SPS-Add-Frontmatter-macOS` → unzip it to get
-  `SPS-Add-Frontmatter.app`
+- **Windows:** `Add-Frontmatter-GUI-Windows` → `Add-Frontmatter-GUI.exe`
+- **Mac:** `Add-Frontmatter-GUI-macOS` → unzip it to get
+  `Add-Frontmatter-GUI.app`
 
 Double-click to open it.
 
@@ -132,13 +132,13 @@ pyinstaller --onefile --name add-frontmatter --paths src --add-binary "<ffmpeg-p
 
 # GUI, Windows — same wrapper idea, plus --windowed (no console window)
 # and --add-data to bundle the app's icon/logo assets
-pyinstaller --onefile --windowed --name SPS-Add-Frontmatter --paths src `
+pyinstaller --onefile --windowed --name Add-Frontmatter-GUI --paths src `
   --add-binary "<ffmpeg-path>;." --add-data "src/add_frontmatter/assets;add_frontmatter/assets" `
   --icon "src/add_frontmatter/assets/sps_logo.ico" src/run_add_frontmatter_gui.py
 
 # GUI, Mac — same idea; --windowed makes PyInstaller wrap the result in a
 # proper .app bundle even in --onefile mode, no separate spec-file step needed
-pyinstaller --onefile --windowed --name SPS-Add-Frontmatter --paths src \
+pyinstaller --onefile --windowed --name Add-Frontmatter-GUI --paths src \
   --add-binary "<ffmpeg-path>:." --add-data "src/add_frontmatter/assets:add_frontmatter/assets" \
   --icon "src/add_frontmatter/assets/sps_logo.icns" src/run_add_frontmatter_gui.py
 ```

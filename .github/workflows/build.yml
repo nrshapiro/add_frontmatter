@@ -3,8 +3,8 @@ name: Build executables
 # Builds three standalone artifacts, none needing Python or ffmpeg installed
 # on the machine that runs them:
 #   1. add-frontmatter.exe   — the original command-line tool (Windows only)
-#   2. SPS-Add-Frontmatter.exe — the GUI, for Windows
-#   3. SPS-Add-Frontmatter.app — the GUI, for Mac
+#   2. Add-Frontmatter-GUI.exe — the GUI, for Windows
+#   3. Add-Frontmatter-GUI.app — the GUI, for Mac
 #
 # All three bundle a real ffmpeg binary directly into the executable at
 # build time (see "Download and cache the ffmpeg binary to bundle" in each
@@ -80,11 +80,11 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact_name: SPS-Add-Frontmatter-Windows
-            build_path: dist/SPS-Add-Frontmatter.exe
+            artifact_name: Add-Frontmatter-GUI-Windows
+            build_path: dist/Add-Frontmatter-GUI.exe
           - os: macos-latest
-            artifact_name: SPS-Add-Frontmatter-macOS
-            build_path: dist/SPS-Add-Frontmatter.app
+            artifact_name: Add-Frontmatter-GUI-macOS
+            build_path: dist/Add-Frontmatter-GUI.app
 
     runs-on: ${{ matrix.os }}
     permissions:
@@ -119,7 +119,7 @@ jobs:
           echo "FFMPEG_PATH=$FFMPEG_PATH" >> "$GITHUB_ENV"
           echo "Bundling ffmpeg from: $FFMPEG_PATH"
 
-      - name: Build SPS-Add-Frontmatter.exe (Windows)
+      - name: Build Add-Frontmatter-GUI.exe (Windows)
         # Built from src/run_add_frontmatter_gui.py for the same reason the
         # CLI build uses its own wrapper script (see that job's comment).
         # --windowed suppresses the console window (this is the whole point
@@ -128,21 +128,21 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          pyinstaller --onefile --windowed --name SPS-Add-Frontmatter `
+          pyinstaller --onefile --windowed --name Add-Frontmatter-GUI `
             --paths src `
             --add-binary "$env:FFMPEG_PATH;." `
             --add-data "src/add_frontmatter/assets;add_frontmatter/assets" `
             --icon "src/add_frontmatter/assets/sps_logo.ico" `
             src/run_add_frontmatter_gui.py
 
-      - name: Build SPS-Add-Frontmatter.app (Mac)
+      - name: Build Add-Frontmatter-GUI.app (Mac)
         # --windowed on macOS makes PyInstaller wrap the result in a proper
         # .app bundle (Contents/MacOS/..., Info.plist, and all) even in
         # --onefile mode, so no separate BUNDLE()/spec-file step is needed.
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          pyinstaller --onefile --windowed --name SPS-Add-Frontmatter \
+          pyinstaller --onefile --windowed --name Add-Frontmatter-GUI \
             --paths src \
             --add-binary "$FFMPEG_PATH:." \
             --add-data "src/add_frontmatter/assets:add_frontmatter/assets" \
