@@ -4,4 +4,4 @@
 # match) -- it's what the GUI's title bar and About dialog, and `--version`
 # on the CLI, actually display. Habit to keep alongside writing release
 # notes: nothing else updates this automatically.
-__version__ = "2.1.2"
+__version__ = "2.2.0"

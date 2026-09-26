@@ -58,6 +58,22 @@ Chat-log detection, in order of preference:
      above matched, use it (last-resort fallback for oddly-named files).
 If none of these produce a candidate, or the trigger phrase isn't found in
 whatever file is found, trimming is skipped entirely -- never an error.
+
+Manual override: renaming a video to include "-StartOffsetMMSS" (e.g.
+"-StartOffset0342" for 3 minutes 42 seconds) overrides all of the above --
+no chat log is even looked for. This exists for when the auto-detected trim
+turns out to be a few seconds off: rather than editing anything, just rename
+the file with a corrected offset and run again ("StartOffset0000" means
+"don't trim this one at all"). Deliberately a fixed 4-digit MM SS format,
+not also accepting some longer HHMMSS form for very long offsets -- the
+lead-in this tool trims is always a few minutes at most, so 99:59 of
+headroom is more than this will ever need, and one unambiguous width is
+simpler than two.
+
+The effective trim offset actually used -- whether from this override or
+from auto-detection -- is echoed back in the OUTPUT filename too (see
+core.py), using this exact same "StartOffsetMMSS" spelling, so nudging it
+after the fact is a copy/paste, not a lookup.
 """
 
 from __future__ import annotations
@@ -78,6 +94,48 @@ MEETING_TIMEZONE = ZoneInfo("America/New_York")
 
 GMT_FILENAME_RE = re.compile(r"GMT(\d{8})-(\d{6})")
 LINE_TIMESTAMP_RE = re.compile(r"^(\d{2}):(\d{2}):(\d{2})")
+
+# The manual override token, e.g. "-StartOffset0342". Case-insensitive (a
+# person retyping this by hand may not match the exact case), and matched
+# anywhere in the filename rather than requiring the leading "-" -- the
+# separator is just a readability convention, not something to enforce.
+OFFSET_TOKEN_RE = re.compile(r"StartOffset(\d{2})(\d{2})", re.IGNORECASE)
+
+
+def override_offset_seconds(video_path: Path) -> int | None:
+    """The manual override offset (in seconds) encoded in the video's own
+    filename, or None if it doesn't have one. See module docstring."""
+    match = OFFSET_TOKEN_RE.search(video_path.stem)
+    if not match:
+        return None
+    minutes, seconds = match.groups()
+    return int(minutes) * 60 + int(seconds)
+
+
+def format_offset_token(seconds: float) -> str:
+    """The reverse of override_offset_seconds: turns an effective offset
+    back into the same "MMSS" spelling, for tagging onto the output
+    filename (see core.py). Rounds to the nearest whole second -- the
+    trim itself is keyframe-snapped anyway, so sub-second precision in the
+    displayed offset would be false precision."""
+    total = int(round(seconds))
+    minutes, secs = divmod(total, 60)
+    return f"{minutes:02d}{secs:02d}"
+
+
+# Matches the override token together with a leading separator, if any, so
+# it can be cleanly removed rather than just zeroed out in place.
+_OVERRIDE_TOKEN_STRIP_RE = re.compile(r"[-_]?StartOffset\d{4}", re.IGNORECASE)
+
+
+def strip_offset_token(name: str) -> str:
+    """Removes a manual "-StartOffsetMMSS" override token from a filename
+    stem, e.g. when building an output filename from a source stem that may
+    carry one -- otherwise it would end up duplicated alongside the
+    "_StartOffsetMMSS" tag core.py adds to report the offset actually
+    used, which may not even be the same number (a person can, and often
+    will, nudge it a little from what they first tried)."""
+    return _OVERRIDE_TOKEN_STRIP_RE.sub("", name)
 
 
 def find_chat_file(video_path: Path) -> Path | None:
@@ -181,18 +239,47 @@ def trim_video(ffmpeg_path: str, video_path: Path, output_path: Path, start_seco
     return ok, (result.stderr.strip()[-800:] if not ok else "ok")
 
 
-def maybe_trim(ffmpeg_path: str, video_path: Path, tmp_dir: Path, trigger: str = DEFAULT_TRIGGER) -> tuple[Path, str]:
-    """The all-in-one entry point used by the pipeline. Always returns a
-    usable video path -- either a freshly trimmed temp file, or the
-    original video_path unchanged, along with a human-readable status
-    message explaining what happened (or didn't, and why)."""
+def maybe_trim(
+    ffmpeg_path: str, video_path: Path, tmp_dir: Path, trigger: str = DEFAULT_TRIGGER,
+) -> tuple[Path, str, float | None]:
+    """The all-in-one entry point used by the pipeline. Always returns
+    (working_video_path, message, effective_offset_seconds):
+      - working_video_path is either a freshly trimmed temp file, or the
+        original video_path unchanged.
+      - message is a human-readable explanation of what happened (or
+        didn't, and why).
+      - effective_offset_seconds is the offset actually trimmed, for the
+        caller to tag onto the output filename (see core.py) -- or None
+        when no trim was applied, so the caller can leave that tag off
+        entirely.
+
+    A manual "-StartOffsetMMSS" override in video_path's own filename takes
+    priority over everything else here -- no chat log is even looked for
+    in that case. See the module docstring for why."""
+    override = override_offset_seconds(video_path)
+    if override is not None:
+        if override <= 0:
+            return video_path, (
+                f"'{video_path.name}' has a StartOffset{format_offset_token(override)} override "
+                f"requesting no trim -- using video as-is"
+            ), None
+        trimmed_path = tmp_dir / f"{video_path.stem}_trimmed{video_path.suffix}"
+        ok, msg = trim_video(ffmpeg_path, video_path, trimmed_path, override)
+        if not ok:
+            return video_path, f"trim ffmpeg command failed ({msg}) -- using original video as-is", None
+        offset_fmt = str(timedelta(seconds=override))
+        return trimmed_path, (
+            f"trimmed {offset_fmt} of lead-in per the StartOffset{format_offset_token(override)} "
+            f"override in the filename"
+        ), override
+
     chat_path = find_chat_file(video_path)
     if chat_path is None:
-        return video_path, "no companion chat log found -- using video as-is"
+        return video_path, "no companion chat log found -- using video as-is", None
 
     marker_time, marker_lineno, line_text = find_trigger_time(chat_path, trigger)
     if marker_time is None:
-        return video_path, f"chat log '{chat_path.name}' found but '{trigger}' not in it -- using video as-is"
+        return video_path, f"chat log '{chat_path.name}' found but '{trigger}' not in it -- using video as-is", None
 
     filename_anchor = video_start_local_time(video_path)
     if filename_anchor is not None:
@@ -205,7 +292,7 @@ def maybe_trim(ffmpeg_path: str, video_path: Path, tmp_dir: Path, trigger: str =
                 f"found '{trigger}' in '{chat_path.name}' but couldn't read a timestamp "
                 f"anywhere in it, and the video's filename has no GMT prefix to fall back "
                 f"on -- using video as-is"
-            )
+            ), None
         anchor_desc = f"chat log's own first line (line {anchor_lineno}) -- less exact, no GMT filename to use instead"
 
     offset = compute_offset_seconds(anchor_time, marker_time)
@@ -214,16 +301,17 @@ def maybe_trim(ffmpeg_path: str, video_path: Path, tmp_dir: Path, trigger: str =
             f"calculated trim offset was {offset:.1f}s (marker at line {marker_lineno} isn't "
             f"after the detected recording start, {anchor_time.strftime('%H:%M:%S')} via "
             f"{anchor_desc}) -- using video as-is"
-        )
+        ), None
 
     trimmed_path = tmp_dir / f"{video_path.stem}_trimmed{video_path.suffix}"
     ok, msg = trim_video(ffmpeg_path, video_path, trimmed_path, offset)
     if not ok:
-        return video_path, f"trim ffmpeg command failed ({msg}) -- using original video as-is"
+        return video_path, f"trim ffmpeg command failed ({msg}) -- using original video as-is", None
 
     offset_fmt = str(timedelta(seconds=int(offset)))
     return trimmed_path, (
         f"trimmed {offset_fmt} of lead-in using '{chat_path.name}' "
         f"(marker '{trigger}' at line {marker_lineno}; recording start {anchor_time.strftime('%H:%M:%S')} "
-        f"via {anchor_desc})"
-    )
+        f"via {anchor_desc}) -- rename the video with e.g. \"-StartOffset{format_offset_token(offset)}\" "
+        f"and re-run to nudge this by hand"
+    ), offset

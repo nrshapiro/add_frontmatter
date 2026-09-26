@@ -24,7 +24,7 @@ from tkinter import filedialog, messagebox, ttk
 from . import __version__
 from .config import load_config, save_config
 from .core import FfmpegNotFoundError, already_processed, get_ffmpeg_path, process_video
-from .trim import DEFAULT_TRIGGER, maybe_trim
+from .trim import DEFAULT_TRIGGER, maybe_trim, strip_offset_token
 
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 
@@ -273,13 +273,14 @@ class FrontmatterGUI:
 
             with tempfile.TemporaryDirectory() as tmp:
                 if auto_trim:
-                    working_video, trim_msg = maybe_trim(ffmpeg_path, video, Path(tmp), DEFAULT_TRIGGER)
+                    working_video, trim_msg, offset_seconds = maybe_trim(ffmpeg_path, video, Path(tmp), DEFAULT_TRIGGER)
                 else:
-                    working_video, trim_msg = video, "trimming disabled"
+                    working_video, trim_msg, offset_seconds = video, "trimming disabled", None
                 self.result_queue.put((video.name, f"trim: {trim_msg}", False))
 
                 success, message = process_video(
-                    ffmpeg_path, frontmatter, working_video, output_dir, output_name_stem=video.stem
+                    ffmpeg_path, frontmatter, working_video, output_dir,
+                    output_name_stem=strip_offset_token(video.stem), offset_seconds=offset_seconds,
                 )
             self.result_queue.put((video.name, f"{'done' if success else 'FAILED'}: {message}", True))
         self.result_queue.put(("__DONE__", "", True))
