@@ -1,9 +1,22 @@
-name: Build Windows exe
+name: Build executables
 
-# Builds a standalone add-frontmatter.exe on every push to main and on every
-# version tag, and attaches it to a GitHub Release for tags. No install of
-# Python, pip, or this package is needed on the machine that runs the exe —
-# everything (including a real ffmpeg binary) is bundled inside it.
+# Builds three standalone artifacts, none needing Python or ffmpeg installed
+# on the machine that runs them:
+#   1. add-frontmatter.exe   — the original command-line tool (Windows only)
+#   2. SPS-Add-Frontmatter.exe — the GUI, for Windows
+#   3. SPS-Add-Frontmatter.app — the GUI, for Mac
+#
+# All three bundle a real ffmpeg binary directly into the executable at
+# build time (see "Download and cache the ffmpeg binary to bundle" in each
+# job below) — nobody running these needs their own internet connection,
+# not even on first launch.
+#
+# Runs on every push to main (so a fresh build is always available from the
+# Actions tab), and attaches all three to a GitHub Release when you push a
+# version tag like "v1.1.0".
+#
+# Manual run: Actions tab -> "Build executables" -> "Run workflow".
+
 on:
   push:
     branches: [main]
@@ -11,7 +24,7 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  build:
+  build-cli-windows:
     runs-on: windows-latest
     permissions:
       contents: write  # needed for the "Attach to release" step to upload assets
@@ -29,10 +42,6 @@ jobs:
           pip install pyinstaller
 
       - name: Download and cache the ffmpeg binary to bundle
-        # Runs the tool's own imageio-ffmpeg dependency once, just to force
-        # the download, then locates the cached exe so PyInstaller can bundle
-        # it directly into the .exe. This means the associate's machine never
-        # needs its own internet connection just to get ffmpeg.
         shell: pwsh
         run: |
           $ffmpegPath = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
@@ -64,3 +73,110 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/add-frontmatter.exe
+
+  build-gui:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: SPS-Add-Frontmatter-Windows
+            build_path: dist/SPS-Add-Frontmatter.exe
+          - os: macos-latest
+            artifact_name: SPS-Add-Frontmatter-macOS
+            build_path: dist/SPS-Add-Frontmatter.app
+
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+          pip install pyinstaller
+
+      - name: Download and cache the ffmpeg binary to bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ffmpegPath = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
+          echo "FFMPEG_PATH=$ffmpegPath" >> $env:GITHUB_ENV
+          echo "Bundling ffmpeg from: $ffmpegPath"
+
+      - name: Download and cache the ffmpeg binary to bundle (Mac)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          FFMPEG_PATH=$(python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())")
+          echo "FFMPEG_PATH=$FFMPEG_PATH" >> "$GITHUB_ENV"
+          echo "Bundling ffmpeg from: $FFMPEG_PATH"
+
+      - name: Build SPS-Add-Frontmatter.exe (Windows)
+        # Built from src/run_add_frontmatter_gui.py for the same reason the
+        # CLI build uses its own wrapper script (see that job's comment).
+        # --windowed suppresses the console window (this is the whole point
+        # for non-developer users). --add-data bundles the app icon/logo
+        # assets the GUI reads via importlib-relative paths at runtime.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pyinstaller --onefile --windowed --name SPS-Add-Frontmatter `
+            --paths src `
+            --add-binary "$env:FFMPEG_PATH;." `
+            --add-data "src/add_frontmatter/assets;add_frontmatter/assets" `
+            --icon "src/add_frontmatter/assets/sps_logo.ico" `
+            src/run_add_frontmatter_gui.py
+
+      - name: Build SPS-Add-Frontmatter.app (Mac)
+        # --windowed on macOS makes PyInstaller wrap the result in a proper
+        # .app bundle (Contents/MacOS/..., Info.plist, and all) even in
+        # --onefile mode, so no separate BUNDLE()/spec-file step is needed.
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          pyinstaller --onefile --windowed --name SPS-Add-Frontmatter \
+            --paths src \
+            --add-binary "$FFMPEG_PATH:." \
+            --add-data "src/add_frontmatter/assets:add_frontmatter/assets" \
+            --icon "src/add_frontmatter/assets/sps_logo.icns" \
+            src/run_add_frontmatter_gui.py
+
+      - name: Zip macOS .app (preserves permissions/resource forks)
+        if: runner.os == 'macOS'
+        run: ditto -c -k --sequesterRsrc --keepParent "${{ matrix.build_path }}" "dist/${{ matrix.artifact_name }}.zip"
+
+      - name: Upload Windows exe as artifact
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.build_path }}
+          if-no-files-found: error
+
+      - name: Upload macOS app as artifact
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.artifact_name }}.zip
+          if-no-files-found: error
+
+      - name: Attach to release (Windows)
+        if: startsWith(github.ref, 'refs/tags/v') && runner.os == 'Windows'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.build_path }}
+
+      - name: Attach to release (Mac)
+        if: startsWith(github.ref, 'refs/tags/v') && runner.os == 'macOS'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/${{ matrix.artifact_name }}.zip

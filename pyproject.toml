@@ -22,5 +22,11 @@ dev = ["pytest", "pyinstaller"]
 [project.scripts]
 add-frontmatter = "add_frontmatter.cli:main"
 
+[project.gui-scripts]
+add-frontmatter-gui = "add_frontmatter.gui:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+add_frontmatter = ["assets/*"]
