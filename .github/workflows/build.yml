@@ -55,11 +55,21 @@ jobs:
         # resolve when add_frontmatter is imported as a package. --paths src
         # puts src/ on sys.path so `import add_frontmatter.cli` in the
         # wrapper finds the package and those relative imports work.
+        # --collect-data tzdata: belt-and-suspenders for the real fix, which
+        # is `tzdata` now being a project dependency (see pyproject.toml).
+        # zoneinfo (trim.py's auto-trim feature) needs an IANA time zone
+        # database to read from; Windows has no system copy of its own, and
+        # without tzdata installed at all, the exe failed at startup with
+        # "No time zone found with key America/New_York" (the v2.1.1 bug).
+        # PyInstaller's own tzdata/zoneinfo hooks already pull it in
+        # automatically once it's installed and zoneinfo is imported -- this
+        # flag just makes that explicit rather than relying on it silently.
         shell: pwsh
         run: |
           pyinstaller --onefile --name add-frontmatter `
             --paths src `
             --add-binary "$env:FFMPEG_PATH;." `
+            --collect-data tzdata `
             src/run_add_frontmatter.py
 
       - name: Upload build artifact
@@ -125,6 +135,8 @@ jobs:
         # --windowed suppresses the console window (this is the whole point
         # for non-developer users). --add-data bundles the app icon/logo
         # assets the GUI reads via importlib-relative paths at runtime.
+        # --collect-data tzdata -- see the CLI build step's comment above;
+        # same bug, same fix, needed here too.
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -133,6 +145,7 @@ jobs:
             --add-binary "$env:FFMPEG_PATH;." `
             --add-data "src/add_frontmatter/assets;add_frontmatter/assets" `
             --icon "src/add_frontmatter/assets/sps_logo.ico" `
+            --collect-data tzdata `
             src/run_add_frontmatter_gui.py
 
       - name: Build Add-Frontmatter-GUI.app (Mac)

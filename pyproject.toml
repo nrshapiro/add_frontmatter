@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "add-frontmatter"
-version = "2.1.1"
+version = "2.1.2"
 description = "Prepend a frontmatter MP4 onto every MP4 in a folder, using ffmpeg."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -14,6 +14,13 @@ authors = [
 ]
 dependencies = [
     "imageio-ffmpeg>=0.4.9",
+    # zoneinfo (used by trim.py for the auto-trim feature's UTC->Eastern
+    # conversion) needs an IANA time zone database to read from. macOS and
+    # most Linux distros already have one on disk, but Windows does not --
+    # tzdata is the official pure-Python fallback zoneinfo reads instead.
+    # Listed unconditionally (not just for Windows) since it's tiny and
+    # this is also what a stripped-down Linux container may be missing.
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]
