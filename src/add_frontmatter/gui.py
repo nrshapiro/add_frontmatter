@@ -32,7 +32,7 @@ APP_DESCRIPTION = (
     "Automates adding a lead-in “frontmatter” video (e.g. a logo) to the front "
     "of a Zoom-recorded meeting video (both MP4). If a Zoom chat log with the same "
     f"base name is found next to a video, it looks for a chat line “{DEFAULT_TRIGGER}” "
-    "(case-insensitive) and trims the video to that point before prepending the "
+    "(case-insensitive) and trims the start of the video to that point before prepending the "
     "frontmatter. Processes as many files as you add, in one batch."
 )
 
