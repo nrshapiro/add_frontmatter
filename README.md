@@ -247,16 +247,21 @@ marker in it, it's trimmed automatically. What's worth knowing:
 - **Computing the trim offset.** Zoom's chat-log timestamps are real
   wall-clock time-of-day (e.g. `22:35:02`, not "35 minutes into the
   meeting"). The offset is the difference between the marker's timestamp
-  and the chat log's own *first* timestamped line — both read off the same
-  clock, in the chat log itself. This deliberately never looks at the
-  video's filename, containing folder, or embedded metadata for this: the
-  video's Zoom-assigned filename timestamp is UTC, while the chat log is
-  the host's local time, and cross-referencing those two clocks directly
-  would silently introduce a multi-hour error. Anchoring entirely within the
-  chat log sidesteps that. (The one edge case: if someone was chatting well
-  before the host actually started recording, the trim will be a bit
-  shorter than ideal, never longer than it should be — safe in the
-  direction that matters.)
+  and a detected "recording actually started here" time, both compared as
+  wall-clock times:
+  - **If the video's filename has Zoom's `GMT<date>-<time>` prefix**
+    (cloud-recording downloads always do), that's an authoritative,
+    to-the-second UTC record of when recording began — converted to
+    Eastern time (this club's own time zone, correctly accounting for
+    EST/EDT) and compared directly against the chat log's wall-clock
+    marker. This is the accurate path and the one real recordings use.
+  - **Otherwise** (a local, non-cloud recording, or a renamed file with no
+    GMT prefix left), the chat log's own *first* timestamped line is used
+    as an approximate stand-in for recording start instead. This is
+    noticeably less exact — in practice it under-trims by however long it
+    took someone to type the first chat message after the host actually
+    hit Record, commonly tens of seconds — but it's the only signal left
+    once the accurate one isn't available, and it never over-trims.
 - **The trim itself** is a fast, lossless stream copy (same as the rest of
   this tool's philosophy of never re-encoding picture it doesn't have to) —
   snapped to the nearest keyframe, so it may start a second or two before

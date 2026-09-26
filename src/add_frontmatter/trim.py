@@ -15,28 +15,35 @@ was verified against a widely-used Zoom-chat-parsing tool
 a strict HH:MM:SS-of-day pattern and only afterward derives elapsed time by
 subtracting a separately-known session start.
 
-Computing the trim offset therefore means comparing two clocks: the chat
-log's wall-clock time, and *some* notion of when the video itself started.
-The original trim_zoom.py prototype (and an earlier version of this file)
-got that second clock from the video's filename, containing folder, or
-embedded metadata -- but the video's Zoom-assigned GMT filename prefix is
-explicitly UTC, while the chat log's wall-clock timestamps are the
-meeting host's LOCAL time. Comparing those directly silently introduces a
-fixed multi-hour error (whatever the local UTC offset is) on any real
-recording -- exactly the kind of large, wrong trim this bug report was
-about, just from a different cause than the one that actually triggered it.
+Computing the trim offset means comparing two clocks: the chat log's
+wall-clock time, and *some* notion of when the video itself started. Two
+approaches were tried and both had a real flaw, in opposite directions:
 
-The fix: never cross-reference the video's clock against the chat log's
-clock at all. Instead, anchor entirely *within the chat log itself* --
-the timestamp of the chat log's OWN FIRST line stands in for "recording
-start" (chat logging begins essentially when the meeting does, generally
-at or before the point someone starts the recording), and the trim offset
-is just (marker time - first line's time), both read off the same clock.
-Time zone becomes irrelevant because nothing outside the chat log is ever
-consulted. The remaining failure mode -- someone chatting well before the
-host actually clicks Record -- only makes the script UNDER-trim (leaves a
-bit more lead-in than strictly necessary), never wildly over-trim, which
-is the safe direction to be wrong in.
+  - Comparing against the video's Zoom-assigned GMT filename prefix
+    directly (an earlier version of this file): that prefix is UTC, while
+    the chat log's wall-clock timestamps are the meeting host's LOCAL
+    time -- comparing them raw silently introduces a fixed multi-hour
+    error (whatever the local UTC offset is).
+  - Anchoring entirely within the chat log itself -- using its own FIRST
+    line as a stand-in for "recording start" (a later version of this
+    file, after the above bug): time zone-safe, but systematically
+    UNDER-trims by however long it took someone to type the first chat
+    message after the host actually clicked Record -- commonly tens of
+    seconds, confirmed in testing (a real recording left ~19s of
+    unwanted lead-in with this approach).
+
+The fix used here: convert the video's own GMT filename timestamp (an
+authoritative, to-the-second UTC record of when Zoom actually started
+recording -- the most accurate source available) into the meeting's local
+time zone, and compare THAT against the chat log's wall-clock marker. This
+club's meetings are always run from the Eastern time zone, so that
+conversion uses the "America/New_York" IANA zone (which correctly accounts
+for EST/EDT across the year) -- hardcoded here the same way this whole
+tool already hardcodes Neil's own folder paths as defaults; not a general
+solution for a differently-located user, but correct for this one.
+Falls back to anchoring on the chat log's own first line (the previous,
+less-accurate approach) only when the video's filename has no GMT prefix
+to convert -- e.g. it's a local (not cloud) Zoom recording.
 
 Chat-log detection, in order of preference:
   1. A .txt file in the same folder sharing the video's own GMT prefix
@@ -57,10 +64,16 @@ from __future__ import annotations
 
 import re
 import subprocess
-from datetime import datetime, timedelta, time as dt_time
+from datetime import datetime, timedelta, time as dt_time, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 DEFAULT_TRIGGER = "!START"
+
+# This project is entirely SPS (Schenectady, NY) specific -- see cli.py's own
+# hardcoded D:\usr6\spsvideos defaults -- so hardcoding the meeting's time
+# zone here follows the same pattern already established in this codebase.
+MEETING_TIMEZONE = ZoneInfo("America/New_York")
 
 GMT_FILENAME_RE = re.compile(r"GMT(\d{8})-(\d{6})")
 LINE_TIMESTAMP_RE = re.compile(r"^(\d{2}):(\d{2}):(\d{2})")
@@ -89,6 +102,23 @@ def find_chat_file(video_path: Path) -> Path | None:
         return txt_files[0]
 
     return None
+
+
+def video_start_local_time(video_path: Path) -> dt_time | None:
+    """Zoom's own GMT<date>-<time> timestamp in the video's filename,
+    converted from UTC to this club's meeting time zone -- the accurate
+    source of "when did recording actually start," in the same wall-clock
+    terms as the chat log. Returns None if the filename has no such prefix
+    (e.g. a local, non-cloud recording, or a file renamed beyond recognition)."""
+    match = GMT_FILENAME_RE.search(video_path.name)
+    if not match:
+        return None
+    date_part, time_part = match.groups()
+    try:
+        utc_dt = datetime.strptime(f"{date_part} {time_part}", "%Y%m%d %H%M%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return utc_dt.astimezone(MEETING_TIMEZONE).time()
 
 
 def _parse_line_timestamp(line: str) -> dt_time | None:
@@ -163,18 +193,26 @@ def maybe_trim(ffmpeg_path: str, video_path: Path, tmp_dir: Path, trigger: str =
     if marker_time is None:
         return video_path, f"chat log '{chat_path.name}' found but '{trigger}' not in it -- using video as-is"
 
-    anchor_time, anchor_lineno = find_first_timestamp(chat_path)
-    if anchor_time is None:
-        return video_path, (
-            f"found '{trigger}' in '{chat_path.name}' but couldn't read a timestamp "
-            f"anywhere in it -- using video as-is"
-        )
+    filename_anchor = video_start_local_time(video_path)
+    if filename_anchor is not None:
+        anchor_time = filename_anchor
+        anchor_desc = f"video's own GMT filename timestamp, converted to {MEETING_TIMEZONE.key}"
+    else:
+        anchor_time, anchor_lineno = find_first_timestamp(chat_path)
+        if anchor_time is None:
+            return video_path, (
+                f"found '{trigger}' in '{chat_path.name}' but couldn't read a timestamp "
+                f"anywhere in it, and the video's filename has no GMT prefix to fall back "
+                f"on -- using video as-is"
+            )
+        anchor_desc = f"chat log's own first line (line {anchor_lineno}) -- less exact, no GMT filename to use instead"
 
     offset = compute_offset_seconds(anchor_time, marker_time)
     if offset <= 0:
         return video_path, (
             f"calculated trim offset was {offset:.1f}s (marker at line {marker_lineno} isn't "
-            f"after the chat log's first line, line {anchor_lineno}) -- using video as-is"
+            f"after the detected recording start, {anchor_time.strftime('%H:%M:%S')} via "
+            f"{anchor_desc}) -- using video as-is"
         )
 
     trimmed_path = tmp_dir / f"{video_path.stem}_trimmed{video_path.suffix}"
@@ -185,6 +223,6 @@ def maybe_trim(ffmpeg_path: str, video_path: Path, tmp_dir: Path, trigger: str =
     offset_fmt = str(timedelta(seconds=int(offset)))
     return trimmed_path, (
         f"trimmed {offset_fmt} of lead-in using '{chat_path.name}' "
-        f"(marker '{trigger}' at line {marker_lineno}, {anchor_time.strftime('%H:%M:%S')} "
-        f"at chat log's first line {anchor_lineno} used as the recording-start anchor)"
+        f"(marker '{trigger}' at line {marker_lineno}; recording start {anchor_time.strftime('%H:%M:%S')} "
+        f"via {anchor_desc})"
     )
