@@ -105,6 +105,23 @@ def find_target_mp4s(target_dir: Path, frontmatter_path: Path, output_dir: Path)
     return results
 
 
+def output_path_for(video_stem: str, video_suffix: str, output_dir: Path) -> Path:
+    """The final output path a given source video would produce. Used both
+    to actually write the result and, before that, to check whether a
+    previous run already produced it (see already_processed)."""
+    return output_dir / f"{video_stem}_{SUFFIX}{video_suffix}"
+
+
+def already_processed(video: Path, output_dir: Path) -> Path | None:
+    """Returns the existing output path if this video was already processed
+    in a previous run, else None. A rerun over a folder you've already
+    processed (e.g. after adding a few new videos) should redo only the new
+    ones -- reprocessing is a full re-encode, not a cheap check, so skipping
+    files that already have output matters."""
+    out_path = output_path_for(video.stem, video.suffix, output_dir)
+    return out_path if out_path.is_file() else None
+
+
 def probe_streams(ffmpeg_path: str, path: Path) -> dict:
     """Best-effort probe of stream info by parsing ffmpeg's own -i output
     (no ffprobe needed, since imageio-ffmpeg only bundles ffmpeg itself)."""
@@ -347,13 +364,23 @@ def mux_video_and_audio(ffmpeg_path: str, video_path: Path, audio_path: Path | N
     return ok, result.stderr.strip()[-800:] if not ok else "ok"
 
 
-def process_video(ffmpeg_path: str, frontmatter: Path, video: Path, output_dir: Path) -> tuple[bool, str]:
+def process_video(
+    ffmpeg_path: str, frontmatter: Path, video: Path, output_dir: Path,
+    output_name_stem: str | None = None,
+) -> tuple[bool, str]:
     """Process a single video. The main video's picture is stream-copied
     (byte-identical, never re-encoded) both at the video-concat step and in
     the final mux. Audio is rebuilt from scratch with sample-accurate
     filtering to guarantee sync at the seam — see module docstring for why
-    that's necessary. Returns (success, message)."""
-    out_name = f"{video.stem}_{SUFFIX}{video.suffix}"
+    that's necessary. Returns (success, message).
+
+    output_name_stem lets a caller pass a trimmed temp file as `video` (see
+    trim.maybe_trim) while still naming the result after the ORIGINAL
+    source file — e.g. "meeting_with_frontmatter.mp4", not
+    "meeting_trimmed_with_frontmatter.mp4". Defaults to video.stem when the
+    caller has no trimming step to worry about."""
+    stem = output_name_stem if output_name_stem is not None else video.stem
+    out_name = f"{stem}_{SUFFIX}{video.suffix}"
     out_path = output_dir / out_name
 
     target = probe_streams(ffmpeg_path, video)

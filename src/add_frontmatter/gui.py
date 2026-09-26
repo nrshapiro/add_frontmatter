@@ -15,13 +15,15 @@ from __future__ import annotations
 
 import queue
 import sys
+import tempfile
 import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .config import load_config, save_config
-from .core import FfmpegNotFoundError, get_ffmpeg_path, process_video
+from .core import FfmpegNotFoundError, already_processed, get_ffmpeg_path, process_video
+from .trim import DEFAULT_TRIGGER, maybe_trim
 
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 
@@ -47,8 +49,9 @@ class FrontmatterGUI:
         self.cfg = load_config()
         self.frontmatter_path = tk.StringVar(value=self.cfg.get("frontmatter", ""))
         self.output_dir_path = tk.StringVar(value=self.cfg.get("output_dir", "") or "")
+        self.auto_trim = tk.BooleanVar(value=self.cfg.get("auto_trim", True))
         self.queued_files: list[Path] = []
-        self.result_queue: "queue.Queue[tuple[str, str]]" = queue.Queue()
+        self.result_queue: "queue.Queue[tuple[str, str, bool]]" = queue.Queue()
         self.worker_running = False
 
         self._build_widgets()
@@ -92,6 +95,14 @@ class FrontmatterGUI:
         ttk.Button(settings_frame, text="Choose…", command=self._choose_output_dir).grid(
             row=1, column=2, pady=(4, 0)
         )
+
+        ttk.Checkbutton(
+            settings_frame,
+            text=f'Auto-trim lead-in when a chat log with "{DEFAULT_TRIGGER}" is found next to a video',
+            variable=self.auto_trim,
+            command=self._save_settings,
+        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(4, 0))
+
         settings_frame.columnconfigure(1, weight=1)
 
         list_frame = ttk.LabelFrame(self.root, text="Files to process", padding=8)
@@ -168,7 +179,7 @@ class FrontmatterGUI:
         # compatible if someone also uses the command line.
         fm = self.frontmatter_path.get()
         target = str(Path(fm).parent) if fm else self.cfg.get("target", "")
-        save_config(target, fm, self.output_dir_path.get() or None)
+        save_config(target, fm, self.output_dir_path.get() or None, self.auto_trim.get())
         self.cfg = load_config()
 
     def _prompt_first_run_setup(self) -> None:
@@ -215,27 +226,46 @@ class FrontmatterGUI:
         self._log(f"\nStarting: {len(files)} file(s) → {output_dir}")
 
         thread = threading.Thread(
-            target=self._worker, args=(ffmpeg_path, Path(frontmatter), files, output_dir), daemon=True
+            target=self._worker,
+            args=(ffmpeg_path, Path(frontmatter), files, output_dir, self.auto_trim.get()),
+            daemon=True,
         )
         thread.start()
 
-    def _worker(self, ffmpeg_path: str, frontmatter: Path, files: list[Path], output_dir: Path) -> None:
+    def _worker(
+        self, ffmpeg_path: str, frontmatter: Path, files: list[Path], output_dir: Path, auto_trim: bool,
+    ) -> None:
         for video in files:
-            success, message = process_video(ffmpeg_path, frontmatter, video, output_dir)
-            self.result_queue.put((video.name, f"{'done' if success else 'FAILED'}: {message}"))
-        self.result_queue.put(("__DONE__", ""))
+            existing = already_processed(video, output_dir)
+            if existing is not None:
+                self.result_queue.put((video.name, f"skipped: already processed -> {existing.name}", True))
+                continue
+
+            with tempfile.TemporaryDirectory() as tmp:
+                if auto_trim:
+                    working_video, trim_msg = maybe_trim(ffmpeg_path, video, Path(tmp), DEFAULT_TRIGGER)
+                else:
+                    working_video, trim_msg = video, "trimming disabled"
+                self.result_queue.put((video.name, f"trim: {trim_msg}", False))
+
+                success, message = process_video(
+                    ffmpeg_path, frontmatter, working_video, output_dir, output_name_stem=video.stem
+                )
+            self.result_queue.put((video.name, f"{'done' if success else 'FAILED'}: {message}", True))
+        self.result_queue.put(("__DONE__", "", True))
 
     def _poll_result_queue(self) -> None:
         try:
             while True:
-                name, message = self.result_queue.get_nowait()
+                name, message, is_terminal = self.result_queue.get_nowait()
                 if name == "__DONE__":
                     self.worker_running = False
                     self.process_btn.configure(state="normal")
                     self._log("All done.")
                 else:
                     self._log(f"{name}: {message}")
-                    self.progress.configure(value=self.progress["value"] + 1)
+                    if is_terminal:
+                        self.progress.configure(value=self.progress["value"] + 1)
         except queue.Empty:
             pass
         self.root.after(150, self._poll_result_queue)

@@ -27,10 +27,22 @@ def load_config() -> dict:
         return {}
 
 
-def save_config(target: str, frontmatter: str, output_dir: str | None) -> Path:
-    """Save the given values as this user's defaults. Returns the config path."""
+def save_config(
+    target: str, frontmatter: str, output_dir: str | None, auto_trim: bool = True,
+) -> Path:
+    """Save the given values as this user's defaults. Returns the config path.
+
+    auto_trim controls the GUI's "Auto-trim using chat marker" checkbox
+    (see gui.py); the CLI always attempts it unless --no-trim is passed, so
+    this setting only affects the GUI. Old config files predating this
+    option simply don't have the key -- load_config().get("auto_trim", True)
+    is how callers should read it, so an existing saved config keeps
+    defaulting to the new behavior rather than silently disabling it."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    data = {"target": target, "frontmatter": frontmatter, "output_dir": output_dir}
+    data = {
+        "target": target, "frontmatter": frontmatter, "output_dir": output_dir,
+        "auto_trim": auto_trim,
+    }
     CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return CONFIG_FILE
 

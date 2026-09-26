@@ -169,11 +169,16 @@ add-frontmatter --configure                      # one-time interactive setup
 add-frontmatter --target "D:\path\to\videos" --frontmatter "D:\path\to\opening.mp4"
 add-frontmatter --output-dir "D:\path\to\somewhere\else"
 add-frontmatter --dry-run                         # process just the first file, to check it
+add-frontmatter --no-trim                         # skip auto-trim even if a chat log is found
+add-frontmatter --trigger "!GO"                   # use a different chat marker than !START
 ```
 
 `--dry-run` processes only the first file found — a real ffmpeg run, not a
 simulation — so you can check the result before committing to the whole
-folder.
+folder. Files that already have a matching `_with_frontmatter` output are
+skipped automatically, so rerunning after adding a few new videos only
+processes what's new. See "Auto-trim details" above for `--no-trim` and
+`--trigger`.
 
 The desktop app (`add-frontmatter-gui` / the `.exe`/`.app` builds) covers
 the same ground through its Settings panel and file list instead of flags —
@@ -182,15 +187,27 @@ see "Desktop app" above.
 ### How it works (both CLI and desktop app — same underlying code)
 
 1. Scans the target folder for `*.mp4` files (skips the frontmatter file
-   itself and anything already ending in `_with_frontmatter`, so reruns are
-   safe). The desktop app instead processes whichever files you've added to
-   its list.
-2. **The main video's picture is never re-encoded** — it's byte-copied,
+   itself and anything already ending in `_with_frontmatter`). The desktop
+   app instead processes whichever files you've added to its list.
+2. **Already-processed files are skipped.** If `<name>_with_frontmatter.mp4`
+   already exists in the output folder, that source video is skipped
+   entirely rather than redone — reruns over a folder you've added a few
+   new videos to only do the new ones, not a full re-encode of everything
+   again.
+3. **Auto-trim, if a companion Zoom chat log is found.** Before the
+   frontmatter step, each video is checked for a chat-log file sitting next
+   to it containing the marker phrase `!START` (typed into the meeting chat
+   by whoever's hosting, right before the real content begins). If found,
+   the lead-in before that marker is losslessly trimmed off first; if no
+   chat log is found, or the marker isn't in it, the video is used as-is —
+   this is purely additive and never blocks processing. See "Auto-trim
+   details" below for exactly what's expected and how it decides.
+4. **The main video's picture is never re-encoded** — it's byte-copied,
    unchanged, throughout. The tool probes the main video's exact resolution,
    frame rate, and pixel format, then re-encodes a temporary copy of the
    frontmatter's video to match precisely. The two video tracks are then
    joined with a plain stream copy.
-3. Audio is built separately from video on purpose. Feeding a freshly
+5. Audio is built separately from video on purpose. Feeding a freshly
    re-encoded frontmatter *audio* segment into a plain stream-copy concat
    alongside video looks fine but isn't: AAC always pads to whole encoder
    frames, so a fresh segment's encoded length can't be trimmed to match the
@@ -201,10 +218,47 @@ see "Desktop app" above.
    *measured* exact duration, then muxed against the untouched video. This
    is the one part of the main video file that does get re-encoded — its
    audio, not its picture — because that's what's needed to guarantee sync.
-4. If the main video has no audio track at all, the output has none either.
+6. If the main video has no audio track at all, the output has none either.
    If the main video has audio but the frontmatter doesn't, silence matching
    the main video's audio format fills the frontmatter's portion.
-5. Saves each result with the `_with_frontmatter` suffix.
+7. Saves each result with the `_with_frontmatter` suffix.
+
+### Auto-trim details
+
+No setup needed to *use* this — if a video has a companion chat log with the
+marker in it, it's trimmed automatically. What's worth knowing:
+
+- **The marker.** Default is `!START`, typed anywhere in the meeting chat
+  (case-insensitive) by whoever's hosting, right before the real content
+  begins. Override it with `--trigger "!GO"` (CLI) — the desktop app always
+  uses the default. If the marker appears more than once in the chat, the
+  *first* occurrence is used.
+- **Finding the chat log.** Any `.txt` file in the same folder as the video
+  is a candidate, picked in this order: (1) one whose name shares the
+  video's own `GMT<date>-<time>` prefix, if the video's filename has one —
+  this is exactly how Zoom names a cloud recording's chat-log download
+  alongside its video (e.g. `GMT20231018-225042_Recording.txt` next to
+  `GMT20231018-225042_Recording_1920x1080.mp4`), even though that filename
+  doesn't contain the word "chat" anywhere; (2) failing that, any file with
+  "chat" in its name (covers Zoom's local `meeting_saved_chat.txt`); (3) if
+  exactly one `.txt` file is sitting there and neither of the above matched,
+  that one is used. No match found at all → trimming is skipped for that
+  video, nothing else changes.
+- **Finding when the video actually started.** Needed to convert the
+  marker's chat timestamp into a trim offset. Tried in order: (1) Zoom's own
+  `GMT<date>-<time>` timestamp in the *video's own filename* — the most
+  reliable, since it survives someone renaming the file afterward (e.g.
+  appending a resolution suffix) as long as that leading `GMT...` token
+  stays intact; (2) the containing folder's name, if it matches Zoom's
+  local-recording convention (`YYYY-MM-DD HH.MM.SS Meeting Name`); (3) the
+  video's own embedded `creation_time` metadata, as a last resort.
+- **The trim itself** is a fast, lossless stream copy (same as the rest of
+  this tool's philosophy of never re-encoding picture it doesn't have to) —
+  snapped to the nearest keyframe, so it may start a second or two before
+  the exact marker, which is fine for cutting lead-in buffer.
+- **Turning it off:** pass `--no-trim` (CLI) or uncheck "Auto-trim…" in the
+  desktop app's Settings panel (saved for next time, like the other
+  settings there).
 
 ## Troubleshooting
 

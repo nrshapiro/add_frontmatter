@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from pathlib import Path
 
 from .config import CONFIG_FILE, load_config, run_configure
-from .core import FfmpegNotFoundError, find_target_mp4s, get_ffmpeg_path, process_video
+from .core import (
+    FfmpegNotFoundError, already_processed, find_target_mp4s, get_ffmpeg_path, process_video,
+)
+from .trim import DEFAULT_TRIGGER, maybe_trim
 
 # These are Neil's own personal defaults for the SPS videos — anyone else
 # running this tool should run `add-frontmatter --configure` once instead
@@ -42,6 +46,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true",
         help="Process only the first file (a real ffmpeg run, not a simulation) so you can "
              "check the result before running the whole folder.",
+    )
+    ap.add_argument(
+        "--no-trim", action="store_true",
+        help="Skip the automatic lead-in trim even if a companion Zoom chat log with the "
+             f"'{DEFAULT_TRIGGER}' marker is found next to a video.",
+    )
+    ap.add_argument(
+        "--trigger", default=DEFAULT_TRIGGER,
+        help=f"Chat marker phrase that marks where the real content begins (default: {DEFAULT_TRIGGER}).",
     )
     return ap
 
@@ -103,10 +116,26 @@ def main(argv: list[str] | None = None) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     ok_count = 0
+    skipped = []
     failed = []
     for video in videos:
+        existing = already_processed(video, output_dir)
+        if existing is not None:
+            print(f"\nSkipping: {video.name} (already processed -> {existing.name})")
+            skipped.append(video.name)
+            continue
+
         print(f"\nProcessing: {video.name}")
-        success, message = process_video(ffmpeg_path, frontmatter, video, output_dir)
+        with tempfile.TemporaryDirectory() as tmp:
+            if args.no_trim:
+                working_video, trim_msg = video, "trimming disabled (--no-trim)"
+            else:
+                working_video, trim_msg = maybe_trim(ffmpeg_path, video, Path(tmp), args.trigger)
+            print(f"    trim: {trim_msg}")
+
+            success, message = process_video(
+                ffmpeg_path, frontmatter, working_video, output_dir, output_name_stem=video.stem
+            )
         if success:
             print(f"    done: {message}")
             ok_count += 1
@@ -118,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
             print("\n--dry-run: only the first file was processed.")
             break
 
-    print(f"\nDone. {ok_count} succeeded, {len(failed)} failed.")
+    print(f"\nDone. {ok_count} succeeded, {len(skipped)} skipped (already processed), {len(failed)} failed.")
     if failed:
         print("Failed files:\n  " + "\n  ".join(failed))
         return 1
