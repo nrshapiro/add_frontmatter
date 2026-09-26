@@ -7,7 +7,13 @@ separate install needed, it's bundled into every download below.
 Each output file is saved as:
 
 ```
-<original_stem>_with_frontmatter.mp4
+<original_stem>_FMAdded.mp4
+```
+
+or, when a lead-in trim was also applied (see "Auto-trim details" below):
+
+```
+<original_stem>_FMAdded_StartOffsetMMSS.mp4
 ```
 
 Comes in two forms, sharing the same underlying video logic:
@@ -180,10 +186,10 @@ add-frontmatter --trigger "!GO"                   # use a different chat marker 
 
 `--dry-run` processes only the first file found — a real ffmpeg run, not a
 simulation — so you can check the result before committing to the whole
-folder. Files that already have a matching `_with_frontmatter` output are
-skipped automatically, so rerunning after adding a few new videos only
-processes what's new. See "Auto-trim details" above for `--no-trim` and
-`--trigger`.
+folder. Files that already have a matching `_FMAdded` output are skipped
+automatically, so rerunning after adding a few new videos only processes
+what's new. See "Auto-trim details" above for `--no-trim`, `--trigger`, and
+the `-StartOffsetMMSS` manual override.
 
 The desktop app (`add-frontmatter-gui` / the `.exe`/`.app` builds) covers
 the same ground through its Settings panel and file list instead of flags —
@@ -192,21 +198,26 @@ see "Desktop app" above.
 ### How it works (both CLI and desktop app — same underlying code)
 
 1. Scans the target folder for `*.mp4` files (skips the frontmatter file
-   itself and anything already ending in `_with_frontmatter`). The desktop
-   app instead processes whichever files you've added to its list.
-2. **Already-processed files are skipped.** If `<name>_with_frontmatter.mp4`
-   already exists in the output folder, that source video is skipped
-   entirely rather than redone — reruns over a folder you've added a few
-   new videos to only do the new ones, not a full re-encode of everything
-   again.
-3. **Auto-trim, if a companion Zoom chat log is found.** Before the
-   frontmatter step, each video is checked for a chat-log file sitting next
-   to it containing the marker phrase `!START` (typed into the meeting chat
-   by whoever's hosting, right before the real content begins). If found,
-   the lead-in before that marker is losslessly trimmed off first; if no
-   chat log is found, or the marker isn't in it, the video is used as-is —
-   this is purely additive and never blocks processing. See "Auto-trim
-   details" below for exactly what's expected and how it decides.
+   itself and anything already carrying the output naming — see step 7).
+   The desktop app instead processes whichever files you've added to its
+   list.
+2. **Already-processed files are skipped.** If a matching output file
+   already exists — see step 7 for what "matching" means once a trim
+   offset is involved — that source video is skipped entirely rather than
+   redone. Reruns over a folder you've added a few new videos to only do
+   the new ones, not a full re-encode of everything again. **To redo one
+   that came out wrong, delete its output file first** — the tool never
+   overwrites existing output on its own.
+3. **Auto-trim, if a companion Zoom chat log is found (or a manual
+   override).** Before the frontmatter step, each video is checked for a
+   `-StartOffsetMMSS` override in its own filename first, and only if
+   there isn't one, for a chat-log file sitting next to it containing the
+   marker phrase `!START` (typed into the meeting chat by whoever's
+   hosting, right before the real content begins). Either way, the
+   detected lead-in is losslessly trimmed off before the frontmatter step;
+   if neither is found, the video is used as-is — this is purely additive
+   and never blocks processing. See "Auto-trim details" below for exactly
+   what's expected and how it decides.
 4. **The main video's picture is never re-encoded** — it's byte-copied,
    unchanged, throughout. The tool probes the main video's exact resolution,
    frame rate, and pixel format, then re-encodes a temporary copy of the
@@ -226,13 +237,34 @@ see "Desktop app" above.
 6. If the main video has no audio track at all, the output has none either.
    If the main video has audio but the frontmatter doesn't, silence matching
    the main video's audio format fills the frontmatter's portion.
-7. Saves each result with the `_with_frontmatter` suffix.
+7. **Saves each result tagged with what was done to it:** `_FMAdded` always,
+   plus `_StartOffsetMMSS` (the exact offset that was trimmed, in
+   minutes/seconds) whenever a trim was actually applied — so
+   `meeting_FMAdded.mp4` means "frontmatter added, nothing trimmed," and
+   `meeting_FMAdded_StartOffset0342.mp4` means "trimmed 3:42 off the
+   front." This is deliberate: it tells you, from the filename alone,
+   where an *automatic* trim actually cut — no need to open the video just
+   to check. See "Auto-trim details" below for how to use that if it needs
+   a small correction.
 
 ### Auto-trim details
 
 No setup needed to *use* this — if a video has a companion chat log with the
 marker in it, it's trimmed automatically. What's worth knowing:
 
+- **Manual override, and correcting an automatic trim.** Renaming a video to
+  include `-StartOffsetMMSS` anywhere in its filename (e.g.
+  `GMT20231018-225042_Recording_1920x1080-StartOffset0342.mp4` for 3 minutes
+  42 seconds) skips chat-log detection entirely and trims exactly that much
+  instead — no chat log is even required. `-StartOffset0000` means "don't
+  trim this one at all." This exists mainly for correcting an automatic
+  trim that came out a few seconds off: the output filename always reports
+  the offset that was actually used (step 7 above), in this exact same
+  `StartOffsetMMSS` spelling, so nudging it is copy-paste — see
+  `..._FMAdded_StartOffset0342.mp4` in the output, rename the *source*
+  video to `...-StartOffset0344.mp4` to add two seconds, delete the old
+  output, and run again. Fixed at 4 digits (max 99:59) since the lead-in
+  this trims is always at most a few minutes.
 - **The marker.** Default is `!START`, typed anywhere in the meeting chat
   (case-insensitive) by whoever's hosting, right before the real content
   begins. Override it with `--trigger "!GO"` (CLI) — the desktop app always
@@ -273,7 +305,8 @@ marker in it, it's trimmed automatically. What's worth knowing:
   the exact marker, which is fine for cutting lead-in buffer.
 - **Turning it off:** pass `--no-trim` (CLI) or uncheck "Auto-trim…" in the
   desktop app's Settings panel (saved for next time, like the other
-  settings there).
+  settings there). This disables the manual `-StartOffsetMMSS` override too,
+  not just chat-log detection — nothing gets trimmed at all either way.
 
 ## Troubleshooting
 
@@ -288,8 +321,9 @@ installing from source.
 **"No MP4 files to process"** (CLI) / an empty file list after Process
 (desktop app)
 Either the target folder is genuinely empty of MP4s, or everything in it
-already has the `_with_frontmatter` suffix (skipped on purpose, so reruns
-don't double-process files) — CLI only; the desktop app processes exactly
+already has the `_FMAdded` (or `_FMAdded_StartOffsetMMSS`) suffix (skipped
+on purpose, so reruns don't double-process files) — CLI only; the desktop
+app processes exactly
 the files you added regardless of suffix.
 
 **ffmpeg-related errors on first run (source installs only)**

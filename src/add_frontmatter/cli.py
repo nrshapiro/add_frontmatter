@@ -12,7 +12,7 @@ from .config import CONFIG_FILE, load_config, run_configure
 from .core import (
     FfmpegNotFoundError, already_processed, find_target_mp4s, get_ffmpeg_path, process_video,
 )
-from .trim import DEFAULT_TRIGGER, maybe_trim
+from .trim import DEFAULT_TRIGGER, maybe_trim, strip_offset_token
 
 # Placeholder defaults, useful to nobody as-is — anyone running this tool
 # should run `add-frontmatter --configure` once instead of relying on
@@ -54,7 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--no-trim", action="store_true",
         help="Skip the automatic lead-in trim even if a companion Zoom chat log with the "
-             f"'{DEFAULT_TRIGGER}' marker is found next to a video.",
+             f"'{DEFAULT_TRIGGER}' marker is found next to a video, or the video's filename "
+             "has a manual -StartOffsetMMSS override.",
     )
     ap.add_argument(
         "--trigger", default=DEFAULT_TRIGGER,
@@ -133,13 +134,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nProcessing: {video.name}")
         with tempfile.TemporaryDirectory() as tmp:
             if args.no_trim:
-                working_video, trim_msg = video, "trimming disabled (--no-trim)"
+                working_video, trim_msg, offset_seconds = video, "trimming disabled (--no-trim)", None
             else:
-                working_video, trim_msg = maybe_trim(ffmpeg_path, video, Path(tmp), args.trigger)
+                working_video, trim_msg, offset_seconds = maybe_trim(ffmpeg_path, video, Path(tmp), args.trigger)
             print(f"    trim: {trim_msg}")
 
             success, message = process_video(
-                ffmpeg_path, frontmatter, working_video, output_dir, output_name_stem=video.stem
+                ffmpeg_path, frontmatter, working_video, output_dir,
+                output_name_stem=strip_offset_token(video.stem), offset_seconds=offset_seconds,
             )
         if success:
             print(f"    done: {message}")

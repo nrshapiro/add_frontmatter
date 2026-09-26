@@ -28,7 +28,24 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-SUFFIX = "with_frontmatter"
+from .trim import format_offset_token, strip_offset_token
+
+# Tagged onto every output filename as "_{FM_SUFFIX}", and, when a trim was
+# also applied, followed by "_StartOffsetMMSS" (same spelling as the manual
+# override token in trim.py) reporting the exact offset that was used --
+# so the person reviewing the output can see at a glance whether/where it
+# was cut, and nudge it by renaming the SOURCE video with a corrected
+# StartOffsetMMSS and re-running, no lookup required.
+#
+# Renamed from this project's original "with_frontmatter" suffix -- so a
+# video already processed under that older naming, if its source file is
+# still sitting in the target folder, won't be recognized as already done
+# by find_target_mp4s/already_processed below and will look like new work.
+FM_SUFFIX = "FMAdded"
+
+# Matches the end of an output file's stem: "_FMAdded" alone (no trim was
+# applied), or "_FMAdded_StartOffsetMMSS" (a trim was applied and reported).
+_OUTPUT_STEM_RE = re.compile(rf"_{FM_SUFFIX}(_StartOffset\d{{4}})?$", re.IGNORECASE)
 
 # Common audio channel-layout names -> channel count.
 _CHANNEL_COUNTS = {
@@ -92,24 +109,35 @@ def get_ffmpeg_path() -> str:
 
 def find_target_mp4s(target_dir: Path, frontmatter_path: Path, output_dir: Path) -> list[Path]:
     """MP4s directly in target_dir, excluding the frontmatter file, anything
-    already in output_dir, and anything already carrying the suffix."""
+    already in output_dir, and anything already carrying the output suffix."""
     results = []
     for p in sorted(target_dir.glob("*.mp4")):
         if p.resolve() == frontmatter_path.resolve():
             continue
         if output_dir.resolve() != target_dir.resolve() and p.parent.resolve() == output_dir.resolve():
             continue
-        if p.stem.endswith(f"_{SUFFIX}"):
+        if _OUTPUT_STEM_RE.search(p.stem):
             continue
         results.append(p)
     return results
 
 
-def output_path_for(video_stem: str, video_suffix: str, output_dir: Path) -> Path:
-    """The final output path a given source video would produce. Used both
-    to actually write the result and, before that, to check whether a
-    previous run already produced it (see already_processed)."""
-    return output_dir / f"{video_stem}_{SUFFIX}{video_suffix}"
+def output_path_for(
+    video_stem: str, video_suffix: str, output_dir: Path, offset_seconds: float | None = None,
+) -> Path:
+    """The final output path a given source video would produce.
+
+    offset_seconds is the effective trim offset to report in the filename
+    (see FM_SUFFIX above) -- None when no trim was applied, which leaves
+    that part of the name off entirely rather than reporting a fake zero.
+
+    Used both to actually write the result and, before a trim has even run,
+    to check whether a previous run already produced *some* output for this
+    video (see already_processed) -- which is why that caller can't just
+    compare this against one fixed expected path: the offset in the name it
+    would eventually produce isn't known yet."""
+    offset_tag = f"_StartOffset{format_offset_token(offset_seconds)}" if offset_seconds is not None else ""
+    return output_dir / f"{video_stem}_{FM_SUFFIX}{offset_tag}{video_suffix}"
 
 
 def already_processed(video: Path, output_dir: Path) -> Path | None:
@@ -117,9 +145,34 @@ def already_processed(video: Path, output_dir: Path) -> Path | None:
     in a previous run, else None. A rerun over a folder you've already
     processed (e.g. after adding a few new videos) should redo only the new
     ones -- reprocessing is a full re-encode, not a cheap check, so skipping
-    files that already have output matters."""
-    out_path = output_path_for(video.stem, video.suffix, output_dir)
-    return out_path if out_path.is_file() else None
+    files that already have output matters.
+
+    Can't just check one exact expected path (as the pre-StartOffset-tag
+    version of this function did): a previous run's output filename carries
+    whatever offset was used, which isn't known without redoing the trim --
+    the very check being done to avoid that. So this looks for any file
+    already in output_dir whose name matches "<this video>_FMAdded" with or
+    without a "_StartOffsetMMSS" tag after it, regardless of the exact
+    digits.
+
+    Matches on video.stem with any manual "-StartOffsetMMSS" override
+    stripped out first (see trim.strip_offset_token) -- otherwise a video
+    that was processed once, then renamed with a new/changed override to
+    correct the trim point, would never be recognized as already having
+    output under its *previous* name, and reprocessing would leave the
+    stale old output sitting there right alongside the new one rather than
+    prompting the "delete it and rerun" workflow this is meant to support."""
+    if not output_dir.is_dir():
+        return None
+    base_stem = strip_offset_token(video.stem)
+    pattern = re.compile(
+        rf"^{re.escape(base_stem)}_{FM_SUFFIX}(_StartOffset\d{{4}})?{re.escape(video.suffix)}$",
+        re.IGNORECASE,
+    )
+    for p in output_dir.iterdir():
+        if p.is_file() and pattern.match(p.name):
+            return p
+    return None
 
 
 def probe_streams(ffmpeg_path: str, path: Path) -> dict:
@@ -366,7 +419,7 @@ def mux_video_and_audio(ffmpeg_path: str, video_path: Path, audio_path: Path | N
 
 def process_video(
     ffmpeg_path: str, frontmatter: Path, video: Path, output_dir: Path,
-    output_name_stem: str | None = None,
+    output_name_stem: str | None = None, offset_seconds: float | None = None,
 ) -> tuple[bool, str]:
     """Process a single video. The main video's picture is stream-copied
     (byte-identical, never re-encoded) both at the video-concat step and in
@@ -376,12 +429,19 @@ def process_video(
 
     output_name_stem lets a caller pass a trimmed temp file as `video` (see
     trim.maybe_trim) while still naming the result after the ORIGINAL
-    source file — e.g. "meeting_with_frontmatter.mp4", not
-    "meeting_trimmed_with_frontmatter.mp4". Defaults to video.stem when the
-    caller has no trimming step to worry about."""
+    source file — e.g. "meeting_FMAdded.mp4", not
+    "meeting_trimmed_FMAdded.mp4". Defaults to video.stem when the caller
+    has no trimming step to worry about. Should already have any manual
+    "-StartOffsetMMSS" override token stripped out by the caller (see
+    trim.strip_offset_token) -- this function doesn't do that itself, only
+    appends the effective offset_seconds actually used.
+
+    offset_seconds is the effective trim offset applied before this call
+    (None if none was), passed straight through to output_path_for so it
+    ends up reported in the output filename."""
     stem = output_name_stem if output_name_stem is not None else video.stem
-    out_name = f"{stem}_{SUFFIX}{video.suffix}"
-    out_path = output_dir / out_name
+    out_path = output_path_for(stem, video.suffix, output_dir, offset_seconds)
+    out_name = out_path.name
 
     target = probe_streams(ffmpeg_path, video)
 
