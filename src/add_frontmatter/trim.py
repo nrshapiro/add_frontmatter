@@ -86,6 +86,15 @@ from zoneinfo import ZoneInfo
 
 DEFAULT_TRIGGER = "!START"
 
+# The largest offset representable in the fixed 4-digit "MMSS" format (see
+# OFFSET_TOKEN_RE / format_offset_token below) -- 99 minutes 59 seconds. Also
+# used as a sanity ceiling on AUTO-DETECTED offsets in maybe_trim: a real
+# meeting's lead-in chatter is a few minutes at most, so a *computed* offset
+# beyond this points to something having gone wrong upstream (a misread
+# chat-log timestamp, a bad anchor, etc.), not a legitimately long lead-in --
+# better to skip the trim than silently apply a wildly wrong one.
+MAX_OFFSET_SECONDS = 99 * 60 + 59
+
 # This tool is built for one specific group's recurring meetings, all run
 # from the same time zone -- so hardcoding the meeting's time zone here
 # follows the same pattern already established elsewhere in this codebase
@@ -117,8 +126,19 @@ def format_offset_token(seconds: float) -> str:
     back into the same "MMSS" spelling, for tagging onto the output
     filename (see core.py). Rounds to the nearest whole second -- the
     trim itself is keyframe-snapped anyway, so sub-second precision in the
-    displayed offset would be false precision."""
+    displayed offset would be false precision.
+
+    Raises ValueError outside the format's representable range (0-99:59)
+    rather than silently emitting a 5th digit -- callers are expected to
+    have already guarded against this (see MAX_OFFSET_SECONDS); this is a
+    last-ditch check so a bug upstream fails loudly instead of producing a
+    filename that no longer matches the documented "StartOffsetMMSS" shape."""
     total = int(round(seconds))
+    if not 0 <= total <= MAX_OFFSET_SECONDS:
+        raise ValueError(
+            f"offset {total}s is outside the StartOffsetMMSS format's representable "
+            f"range (0-{MAX_OFFSET_SECONDS}s / 00:00-99:59)"
+        )
     minutes, secs = divmod(total, 60)
     return f"{minutes:02d}{secs:02d}"
 
@@ -239,6 +259,41 @@ def trim_video(ffmpeg_path: str, video_path: Path, output_path: Path, start_seco
     return ok, (result.stderr.strip()[-800:] if not ok else "ok")
 
 
+def _probe_duration_seconds(ffmpeg_path: str, video_path: Path) -> float | None:
+    """Best-effort video duration in seconds, via ffmpeg's own -i banner
+    output (the same technique as core.probe_streams' duration parsing,
+    narrowly duplicated here rather than imported -- core.py imports FROM
+    this module, so importing core here would create a cycle). Returns None
+    if it can't be determined, which callers should treat as "can't
+    validate this, proceed anyway" rather than blocking the trim."""
+    result = subprocess.run(
+        [ffmpeg_path, "-hide_banner", "-i", str(video_path)],
+        capture_output=True, text=True,
+    )
+    m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", result.stderr)
+    if not m:
+        return None
+    h, mnt, s = m.groups()
+    return int(h) * 3600 + int(mnt) * 60 + float(s)
+
+
+def _offset_too_long_for_video(ffmpeg_path: str, video_path: Path, offset: float) -> str | None:
+    """None if `offset` looks safe to trim at, else a ready-to-use message
+    explaining why it was rejected. Guards against trimming (nearly) the
+    entire video away when the offset -- whatever produced it, manual or
+    auto-detected -- turns out to be at or past the video's own duration;
+    ffmpeg's stream-copy trim doesn't error in that case, it just silently
+    produces a near-empty output file."""
+    duration = _probe_duration_seconds(ffmpeg_path, video_path)
+    if duration is None or offset < duration - 1:
+        return None
+    return (
+        f"trim offset {timedelta(seconds=int(offset))} would leave under a second of "
+        f"'{video_path.name}' (its own duration is only ~{timedelta(seconds=int(duration))}) "
+        f"-- skipping the trim rather than producing a near-empty file; using video as-is"
+    )
+
+
 def maybe_trim(
     ffmpeg_path: str, video_path: Path, tmp_dir: Path, trigger: str = DEFAULT_TRIGGER,
 ) -> tuple[Path, str, float | None]:
@@ -263,6 +318,9 @@ def maybe_trim(
                 f"'{video_path.name}' has a StartOffset{format_offset_token(override)} override "
                 f"requesting no trim -- using video as-is"
             ), None
+        too_long_msg = _offset_too_long_for_video(ffmpeg_path, video_path, override)
+        if too_long_msg is not None:
+            return video_path, too_long_msg, None
         trimmed_path = tmp_dir / f"{video_path.stem}_trimmed{video_path.suffix}"
         ok, msg = trim_video(ffmpeg_path, video_path, trimmed_path, override)
         if not ok:
@@ -302,6 +360,18 @@ def maybe_trim(
             f"after the detected recording start, {anchor_time.strftime('%H:%M:%S')} via "
             f"{anchor_desc}) -- using video as-is"
         ), None
+    if offset > MAX_OFFSET_SECONDS:
+        return video_path, (
+            f"calculated trim offset ({timedelta(seconds=int(offset))}, marker at line "
+            f"{marker_lineno} vs. detected recording start {anchor_time.strftime('%H:%M:%S')} "
+            f"via {anchor_desc}) is implausibly large for a meeting lead-in -- treating this as "
+            f"a computation error (e.g. a misread chat-log timestamp) rather than a real trim "
+            f"point; using video as-is. Check '{chat_path.name}', or use a manual "
+            f"-StartOffsetMMSS override instead"
+        ), None
+    too_long_msg = _offset_too_long_for_video(ffmpeg_path, video_path, offset)
+    if too_long_msg is not None:
+        return video_path, too_long_msg, None
 
     trimmed_path = tmp_dir / f"{video_path.stem}_trimmed{video_path.suffix}"
     ok, msg = trim_video(ffmpeg_path, video_path, trimmed_path, offset)
