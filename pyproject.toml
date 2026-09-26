@@ -9,6 +9,9 @@ description = "Prepend a frontmatter MP4 onto every MP4 in a folder, using ffmpe
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
+authors = [
+    { name = "Neil Shapiro" }
+]
 dependencies = [
     "imageio-ffmpeg>=0.4.9",
 ]
