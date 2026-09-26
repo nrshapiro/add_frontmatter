@@ -51,7 +51,7 @@ def _resource_path(name: str) -> Path:
 class FrontmatterGUI:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title(f"SPS Add Frontmatter — v{__version__}")
+        self.root.title(f"Add Frontmatter — v{__version__}")
         self.root.geometry("640x580")
         self.root.minsize(520, 460)
 

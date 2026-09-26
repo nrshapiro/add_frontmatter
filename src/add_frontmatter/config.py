@@ -3,7 +3,7 @@
 Lets each person running this tool save their own default folders (target,
 frontmatter, output) once, instead of typing --target/--frontmatter on every
 run. Precedence is: command-line flags > saved config > the built-in
-defaults in cli.py (which are specific to the original SPS video setup).
+defaults in cli.py (which are placeholders from the original setup).
 """
 
 from __future__ import annotations

@@ -14,9 +14,9 @@ from .core import (
 )
 from .trim import DEFAULT_TRIGGER, maybe_trim
 
-# These are Neil's own personal defaults for the SPS videos — anyone else
-# running this tool should run `add-frontmatter --configure` once instead
-# of relying on these, or pass --target/--frontmatter explicitly.
+# Placeholder defaults, useful to nobody as-is — anyone running this tool
+# should run `add-frontmatter --configure` once instead of relying on
+# these, or pass --target/--frontmatter explicitly.
 DEFAULT_TARGET = r"D:\usr6\spsvideos\for_append"
 DEFAULT_FRONTMATTER = r"D:\usr6\spsvideos\for_append\frontmatter\New_SPS_Opening_2022.1.mp4"
 
@@ -36,11 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--target", default=None,
         help="Folder of MP4s to process. Defaults to your saved config (see --configure), "
-             "else Neil's personal default.",
+             "else a placeholder default.",
     )
     ap.add_argument(
         "--frontmatter", default=None,
-        help="MP4 to prepend to each file. Defaults to your saved config, else Neil's personal default.",
+        help="MP4 to prepend to each file. Defaults to your saved config, else a placeholder default.",
     )
     ap.add_argument(
         "--output-dir", default=None,

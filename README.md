@@ -64,7 +64,7 @@ add-frontmatter --configure
 
 Asks for your video folder and your frontmatter file, then remembers them
 for every future run. (These are *your own* folders — the tool ships with
-no useful defaults for anyone but Neil, so this step matters.)
+generic placeholder defaults, so this step matters.)
 
 ```
 add-frontmatter --dry-run
@@ -166,8 +166,8 @@ a description of each one.
 `--target`, `--frontmatter`, and `--output-dir` can come from three places.
 If you pass one on the command line, that's used. Otherwise, it falls back
 to whatever you saved with `--configure`. If neither is set, it falls back
-to Neil's own hardcoded folders (`D:\usr6\spsvideos\...`) — meant only for
-his machine, not a useful default for anyone else.
+to a hardcoded placeholder path — not a useful default for anyone, just a
+value that has to be there — so running `--configure` first is worthwhile.
 
 ```bash
 add-frontmatter --configure                      # one-time interactive setup

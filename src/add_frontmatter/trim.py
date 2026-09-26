@@ -39,7 +39,7 @@ time zone, and compare THAT against the chat log's wall-clock marker. This
 club's meetings are always run from the Eastern time zone, so that
 conversion uses the "America/New_York" IANA zone (which correctly accounts
 for EST/EDT across the year) -- hardcoded here the same way this whole
-tool already hardcodes Neil's own folder paths as defaults; not a general
+tool already hardcodes a set of default folder paths; not a general
 solution for a differently-located user, but correct for this one.
 Falls back to anchoring on the chat log's own first line (the previous,
 less-accurate approach) only when the video's filename has no GMT prefix
@@ -70,9 +70,10 @@ from zoneinfo import ZoneInfo
 
 DEFAULT_TRIGGER = "!START"
 
-# This project is entirely SPS (Schenectady, NY) specific -- see cli.py's own
-# hardcoded D:\usr6\spsvideos defaults -- so hardcoding the meeting's time
-# zone here follows the same pattern already established in this codebase.
+# This tool is built for one specific group's recurring meetings, all run
+# from the same time zone -- so hardcoding the meeting's time zone here
+# follows the same pattern already established elsewhere in this codebase
+# (see cli.py's own hardcoded default folder paths).
 MEETING_TIMEZONE = ZoneInfo("America/New_York")
 
 GMT_FILENAME_RE = re.compile(r"GMT(\d{8})-(\d{6})")
