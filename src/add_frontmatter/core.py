@@ -50,16 +50,24 @@ def _bundled_ffmpeg_path() -> Path | None:
     bundled into it at build time (see .github/workflows/build.yml), return
     its path. Returns None for a normal `pip`/source run, or a build that
     didn't bundle one — get_ffmpeg_path() falls back to imageio-ffmpeg
-    either way."""
+    either way.
+
+    Matched by a "ffmpeg*" prefix rather than an exact "ffmpeg"/"ffmpeg.exe"
+    name: PyInstaller's --add-binary preserves the source file's own
+    filename rather than renaming it, and imageio-ffmpeg's cached binaries
+    are versioned (e.g. "ffmpeg-linux-x86_64-v7.0.2", "ffmpeg-win64-v4.2.2.exe")
+    -- an exact-name check never matches those and silently falls through to
+    the imageio-ffmpeg download path every time, even in a build that did
+    bundle one."""
     import sys
     meipass = getattr(sys, "_MEIPASS", None)
     if not meipass:
         return None
-    for name in ("ffmpeg.exe", "ffmpeg"):
-        candidate = Path(meipass) / name
-        if candidate.is_file():
-            return candidate
-    return None
+    candidates = sorted(
+        p for p in Path(meipass).glob("ffmpeg*")
+        if p.is_file() and p.suffix.lower() not in (".txt", ".toc", ".py")
+    )
+    return candidates[0] if candidates else None
 
 
 def get_ffmpeg_path() -> str:
