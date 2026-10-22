@@ -150,10 +150,23 @@ class FrontmatterGUI:
         self.progress = ttk.Progressbar(self.root, mode="determinate")
         self.progress.pack(fill="x", padx=12, pady=(6, 0))
 
+        # A single prominent line showing what's happening right now (e.g.
+        # "Looking for a companion chat log...", "Trimmed 0:20:15 of
+        # lead-in..."), in addition to the scrolling Log below -- so the
+        # current status is visible at a glance without having to read
+        # back through the log.
+        self.status_var = tk.StringVar(value="Idle.")
+        ttk.Label(
+            self.root, textvariable=self.status_var, foreground="#444444", wraplength=600, justify="left",
+        ).pack(fill="x", padx=12, pady=(2, 0), anchor="w")
+
         log_frame = ttk.LabelFrame(self.root, text="Log", padding=4)
-        log_frame.pack(fill="both", expand=False, padx=12, pady=(6, 12))
-        self.log_text = tk.Text(log_frame, height=8, state="disabled", wrap="word")
-        self.log_text.pack(fill="both", expand=True)
+        log_frame.pack(fill="both", expand=True, padx=12, pady=(6, 12))
+        self.log_text = tk.Text(log_frame, height=12, state="disabled", wrap="word")
+        log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=log_scroll.set)
+        log_scroll.pack(side="right", fill="y")
+        self.log_text.pack(fill="both", expand=True, side="left")
 
     # ------------------------------------------------------- file mgmt ----
 
@@ -172,7 +185,7 @@ class FrontmatterGUI:
             self.file_list.insert("end", p.name)
             added += 1
         if added:
-            self._log(f"Added {added} file(s).")
+            self._log(f"Added {added} file(s).", status=False)
 
     def _remove_selected(self) -> None:
         for idx in reversed(self.file_list.curselection()):
@@ -223,11 +236,18 @@ class FrontmatterGUI:
 
     # --------------------------------------------------------- logging ----
 
-    def _log(self, message: str) -> None:
+    def _log(self, message: str, *, status: bool = True) -> None:
+        """Append to the scrolling Log, and, unless `status` is False (used
+        only for the initial "Added N file(s)" message, which isn't
+        progress on a run), also show it as the current status line above
+        the progress bar -- so what's happening right now is visible
+        without having to read back through the log."""
         self.log_text.configure(state="normal")
         self.log_text.insert("end", message + "\n")
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
+        if status:
+            self.status_var.set(message)
 
     # -------------------------------------------------------- processing ----
 
@@ -268,6 +288,7 @@ class FrontmatterGUI:
         self, ffmpeg_path: str, frontmatter: Path, files: list[Path], output_dir: Path, auto_trim: bool,
     ) -> None:
         for video in files:
+            self.result_queue.put((video.name, "starting...", False))
             existing = already_processed(video, output_dir)
             if existing is not None:
                 self.result_queue.put((video.name, f"skipped: already processed -> {existing.name}", True))
@@ -275,6 +296,7 @@ class FrontmatterGUI:
 
             with tempfile.TemporaryDirectory() as tmp:
                 if auto_trim:
+                    self.result_queue.put((video.name, "looking for a companion chat log...", False))
                     working_video, trim_msg, offset_seconds = maybe_trim(ffmpeg_path, video, Path(tmp), DEFAULT_TRIGGERS)
                 else:
                     working_video, trim_msg, offset_seconds = video, "trimming disabled", None
