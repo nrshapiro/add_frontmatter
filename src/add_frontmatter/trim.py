@@ -61,6 +61,22 @@ Chat-log detection, in order of preference:
 If none of these produce a candidate, or the trigger phrase isn't found in
 whatever file is found, trimming is skipped entirely -- never an error.
 
+A second Zoom chat-log variant, confirmed in testing (2026-10-22): files
+named "GMT<date>-<time>_RecordingnewChat.txt" (note "newChat", distinct
+from the plain "..._Recording.txt" variant strategy 1 above was written
+against) use ELAPSED time-since-recording-start for their timestamps, not
+wall-clock time-of-day -- e.g. "00:20:15" means "20 minutes 15 seconds
+into the recording", not "12:20:15 AM". Feeding that straight into the
+wall-clock-anchor logic above produces a nonsense multi-hour offset (the
+marker's small elapsed value read as a wall-clock time rolls over to "the
+next day" against compute_offset_seconds' AM/PM-wraparound logic), which
+MAX_OFFSET_SECONDS then correctly rejects as implausible -- so this fails
+safe (skips the trim) rather than corrupting the video, but still skips a
+trim that should have worked. is_elapsed_chat_log() detects this variant
+by filename and, when it matches, maybe_trim uses the marker's timestamp
+directly as the offset -- no anchor needed, since it's already a duration
+rather than a clock reading.
+
 Manual override: renaming a video to include "-StartOffsetMMSS" (e.g.
 "-StartOffset0342" for 3 minutes 42 seconds) overrides all of the above --
 no chat log is even looked for. This exists for when the auto-detected trim
@@ -190,6 +206,15 @@ def find_chat_file(video_path: Path) -> Path | None:
         return txt_files[0]
 
     return None
+
+
+def is_elapsed_chat_log(chat_path: Path) -> bool:
+    """True for Zoom's "...RecordingnewChat.txt" chat-log variant, whose
+    timestamps are elapsed time-since-recording-start rather than
+    wall-clock time-of-day (see module docstring). Detected by filename
+    only -- there's no reliable way to tell the two timestamp conventions
+    apart just by looking at the times themselves."""
+    return "newchat" in chat_path.name.lower()
 
 
 def video_start_local_time(video_path: Path) -> dt_time | None:
@@ -356,35 +381,55 @@ def maybe_trim(
     if marker_time is None:
         return video_path, f"chat log '{chat_path.name}' found but none of {trigger_desc} is in it -- using video as-is", None
 
-    filename_anchor = video_start_local_time(video_path)
-    if filename_anchor is not None:
-        anchor_time = filename_anchor
-        anchor_desc = f"video's own GMT filename timestamp, converted to {MEETING_TIMEZONE.key}"
+    if is_elapsed_chat_log(chat_path):
+        # This chat-log variant's timestamps are already elapsed time
+        # since recording start, not wall-clock time-of-day -- the marker
+        # time IS the offset, no anchor to compare it against (see module
+        # docstring and is_elapsed_chat_log).
+        offset = marker_time.hour * 3600 + marker_time.minute * 60 + marker_time.second
+        anchor_time = None
+        anchor_desc = (
+            f"'{chat_path.name}' itself -- this Zoom chat-log variant's timestamps are elapsed "
+            f"time since recording start, not wall-clock time, so the marker's own timestamp "
+            f"is the offset"
+        )
     else:
-        anchor_time, anchor_lineno = find_first_timestamp(chat_path)
-        if anchor_time is None:
-            return video_path, (
-                f"found {trigger_desc} in '{chat_path.name}' but couldn't read a timestamp "
-                f"anywhere in it, and the video's filename has no GMT prefix to fall back "
-                f"on -- using video as-is"
-            ), None
-        anchor_desc = f"chat log's own first line (line {anchor_lineno}) -- less exact, no GMT filename to use instead"
+        filename_anchor = video_start_local_time(video_path)
+        if filename_anchor is not None:
+            anchor_time = filename_anchor
+            anchor_desc = f"video's own GMT filename timestamp, converted to {MEETING_TIMEZONE.key}"
+        else:
+            anchor_time, anchor_lineno = find_first_timestamp(chat_path)
+            if anchor_time is None:
+                return video_path, (
+                    f"found {trigger_desc} in '{chat_path.name}' but couldn't read a timestamp "
+                    f"anywhere in it, and the video's filename has no GMT prefix to fall back "
+                    f"on -- using video as-is"
+                ), None
+            anchor_desc = f"chat log's own first line (line {anchor_lineno}) -- less exact, no GMT filename to use instead"
 
-    offset = compute_offset_seconds(anchor_time, marker_time)
+        offset = compute_offset_seconds(anchor_time, marker_time)
+
+    # When anchor_time is None (the elapsed-timestamp chat-log variant),
+    # there's no clock reading to report -- anchor_desc alone already
+    # explains where the offset came from.
+    anchor_clause = (
+        f"recording start {anchor_time.strftime('%H:%M:%S')} via {anchor_desc}"
+        if anchor_time is not None else anchor_desc
+    )
+
     if offset <= 0:
         return video_path, (
             f"calculated trim offset was {offset:.1f}s (marker at line {marker_lineno} isn't "
-            f"after the detected recording start, {anchor_time.strftime('%H:%M:%S')} via "
-            f"{anchor_desc}) -- using video as-is"
+            f"after the detected {anchor_clause}) -- using video as-is"
         ), None
     if offset > MAX_OFFSET_SECONDS:
         return video_path, (
             f"calculated trim offset ({timedelta(seconds=int(offset))}, marker at line "
-            f"{marker_lineno} vs. detected recording start {anchor_time.strftime('%H:%M:%S')} "
-            f"via {anchor_desc}) is implausibly large for a meeting lead-in -- treating this as "
-            f"a computation error (e.g. a misread chat-log timestamp) rather than a real trim "
-            f"point; using video as-is. Check '{chat_path.name}', or use a manual "
-            f"-StartOffsetMMSS override instead"
+            f"{marker_lineno} vs. detected {anchor_clause}) is implausibly large for a meeting "
+            f"lead-in -- treating this as a computation error (e.g. a misread chat-log "
+            f"timestamp) rather than a real trim point; using video as-is. Check "
+            f"'{chat_path.name}', or use a manual -StartOffsetMMSS override instead"
         ), None
     too_long_msg = _offset_too_long_for_video(ffmpeg_path, video_path, offset)
     if too_long_msg is not None:
@@ -401,7 +446,7 @@ def maybe_trim(
     offset_fmt = str(timedelta(seconds=int(offset)))
     return trimmed_path, (
         f"trimmed {offset_fmt} of lead-in using '{chat_path.name}' "
-        f"(marker '{matched_trigger}' at line {marker_lineno}; recording start {anchor_time.strftime('%H:%M:%S')} "
-        f"via {anchor_desc}) -- rename the video with e.g. \"-StartOffset{format_offset_token(offset)}\" "
-        f"and re-run to nudge this by hand"
+        f"(marker '{matched_trigger}' at line {marker_lineno}; {anchor_clause}) -- rename the "
+        f"video with e.g. \"-StartOffset{format_offset_token(offset)}\" and re-run to nudge "
+        f"this by hand"
     ), offset
