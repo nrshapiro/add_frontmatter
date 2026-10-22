@@ -12,7 +12,7 @@ from .config import CONFIG_FILE, load_config, run_configure
 from .core import (
     FfmpegNotFoundError, already_processed, find_target_mp4s, get_ffmpeg_path, process_video,
 )
-from .trim import DEFAULT_TRIGGER, maybe_trim, strip_offset_token
+from .trim import DEFAULT_TRIGGERS, maybe_trim, strip_offset_token
 
 # Placeholder defaults, useful to nobody as-is — anyone running this tool
 # should run `add-frontmatter --configure` once instead of relying on
@@ -51,15 +51,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Process only the first file (a real ffmpeg run, not a simulation) so you can "
              "check the result before running the whole folder.",
     )
+    default_trigger_desc = " or ".join(f"'{t}'" for t in DEFAULT_TRIGGERS)
     ap.add_argument(
         "--no-trim", action="store_true",
-        help="Skip the automatic lead-in trim even if a companion Zoom chat log with the "
-             f"'{DEFAULT_TRIGGER}' marker is found next to a video, or the video's filename "
+        help="Skip the automatic lead-in trim even if a companion Zoom chat log with a "
+             f"{default_trigger_desc} marker is found next to a video, or the video's filename "
              "has a manual -StartOffsetMMSS override.",
     )
     ap.add_argument(
-        "--trigger", default=DEFAULT_TRIGGER,
-        help=f"Chat marker phrase that marks where the real content begins (default: {DEFAULT_TRIGGER}).",
+        "--trigger", default=DEFAULT_TRIGGERS,
+        help="Chat marker phrase that marks where the real content begins "
+             f"(default: {default_trigger_desc}). Passing this overrides the default -- only "
+             "your phrase will be recognized, not the defaults too.",
     )
     return ap
 

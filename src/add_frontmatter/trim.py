@@ -2,11 +2,13 @@
 
 Ported from the standalone trim_zoom.py prototype into a library used as an
 automatic first stage of process_video(): if a companion chat log is found
-next to a video and it contains the trigger phrase (default "!START"), the
-video is losslessly trimmed to start right at that marker before frontmatter
-is prepended. If no chat log is found (or the marker isn't in it), the video
-is passed through untouched -- so this is purely additive for anyone not
-using the marker convention.
+next to a video and it contains one of the trigger phrases (default
+"!START" or "iStart" -- the latter a common typo/autocorrect of the
+former, see DEFAULT_TRIGGERS), the video is losslessly trimmed to start
+right at that marker before frontmatter is prepended. If no chat log is
+found (or none of the trigger phrases is in it), the video is passed
+through untouched -- so this is purely additive for anyone not using the
+marker convention.
 
 Zoom's chat log timestamps are real wall-clock time-of-day (e.g. "22:35:02"
 meaning 10:35:02 PM, not "35 minutes 2 seconds into the meeting") -- this
@@ -85,6 +87,13 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 DEFAULT_TRIGGER = "!START"
+
+# Accepted spellings of the marker, matched case-insensitively. "iStart" is
+# included alongside the documented "!START" because it's an easy phone/
+# autocorrect-style mistake for a host to type in the Zoom chat -- someone
+# meant the marker and typed a plausible near-miss, so it should still work
+# rather than silently skipping the trim (see maybe_trim / find_trigger_time).
+DEFAULT_TRIGGERS: tuple[str, ...] = ("!START", "iStart")
 
 # The largest offset representable in the fixed 4-digit "MMSS" format (see
 # OFFSET_TOKEN_RE / format_offset_token below) -- 99 minutes 59 seconds. Also
@@ -220,14 +229,20 @@ def find_first_timestamp(chat_path: Path) -> tuple[dt_time | None, int]:
     return None, 0
 
 
-def find_trigger_time(chat_path: Path, trigger: str) -> tuple[dt_time | None, int, str]:
-    """Returns (time_or_None, line_number, matched_line_text). Uses the
-    FIRST occurrence if the trigger appears more than once (e.g. someone
-    tested it, then said it again for real -- the earlier one wins, same
-    as the original trim_zoom.py prototype's behavior)."""
+def find_trigger_time(
+    chat_path: Path, trigger: str | tuple[str, ...],
+) -> tuple[dt_time | None, int, str]:
+    """Returns (time_or_None, line_number, matched_line_text). `trigger` is
+    either a single marker phrase or a tuple of accepted spellings (see
+    DEFAULT_TRIGGERS) -- any of them counts as a match. Uses the FIRST
+    occurrence if a trigger appears more than once (e.g. someone tested it,
+    then said it again for real -- the earlier one wins, same as the
+    original trim_zoom.py prototype's behavior)."""
+    triggers = (trigger,) if isinstance(trigger, str) else tuple(trigger)
     with open(chat_path, "r", encoding="utf-8", errors="ignore") as f:
         for lineno, line in enumerate(f, start=1):
-            if trigger.lower() in line.lower():
+            line_lower = line.lower()
+            if any(t.lower() in line_lower for t in triggers):
                 t = _parse_line_timestamp(line)
                 if t is not None:
                     return t, lineno, line.strip()
@@ -295,7 +310,8 @@ def _offset_too_long_for_video(ffmpeg_path: str, video_path: Path, offset: float
 
 
 def maybe_trim(
-    ffmpeg_path: str, video_path: Path, tmp_dir: Path, trigger: str = DEFAULT_TRIGGER,
+    ffmpeg_path: str, video_path: Path, tmp_dir: Path,
+    trigger: str | tuple[str, ...] = DEFAULT_TRIGGERS,
 ) -> tuple[Path, str, float | None]:
     """The all-in-one entry point used by the pipeline. Always returns
     (working_video_path, message, effective_offset_seconds):
@@ -335,9 +351,10 @@ def maybe_trim(
     if chat_path is None:
         return video_path, "no companion chat log found -- using video as-is", None
 
+    trigger_desc = f"'{trigger}'" if isinstance(trigger, str) else " or ".join(f"'{t}'" for t in trigger)
     marker_time, marker_lineno, line_text = find_trigger_time(chat_path, trigger)
     if marker_time is None:
-        return video_path, f"chat log '{chat_path.name}' found but '{trigger}' not in it -- using video as-is", None
+        return video_path, f"chat log '{chat_path.name}' found but none of {trigger_desc} is in it -- using video as-is", None
 
     filename_anchor = video_start_local_time(video_path)
     if filename_anchor is not None:
@@ -347,7 +364,7 @@ def maybe_trim(
         anchor_time, anchor_lineno = find_first_timestamp(chat_path)
         if anchor_time is None:
             return video_path, (
-                f"found '{trigger}' in '{chat_path.name}' but couldn't read a timestamp "
+                f"found {trigger_desc} in '{chat_path.name}' but couldn't read a timestamp "
                 f"anywhere in it, and the video's filename has no GMT prefix to fall back "
                 f"on -- using video as-is"
             ), None
@@ -378,10 +395,13 @@ def maybe_trim(
     if not ok:
         return video_path, f"trim ffmpeg command failed ({msg}) -- using original video as-is", None
 
+    triggers_tried = (trigger,) if isinstance(trigger, str) else tuple(trigger)
+    line_text_lower = line_text.lower()
+    matched_trigger = next((t for t in triggers_tried if t.lower() in line_text_lower), trigger_desc)
     offset_fmt = str(timedelta(seconds=int(offset)))
     return trimmed_path, (
         f"trimmed {offset_fmt} of lead-in using '{chat_path.name}' "
-        f"(marker '{trigger}' at line {marker_lineno}; recording start {anchor_time.strftime('%H:%M:%S')} "
+        f"(marker '{matched_trigger}' at line {marker_lineno}; recording start {anchor_time.strftime('%H:%M:%S')} "
         f"via {anchor_desc}) -- rename the video with e.g. \"-StartOffset{format_offset_token(offset)}\" "
         f"and re-run to nudge this by hand"
     ), offset

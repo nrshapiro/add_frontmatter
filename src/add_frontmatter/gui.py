@@ -24,14 +24,16 @@ from tkinter import filedialog, messagebox, ttk
 from . import __version__
 from .config import load_config, save_config
 from .core import FfmpegNotFoundError, already_processed, get_ffmpeg_path, process_video
-from .trim import DEFAULT_TRIGGER, maybe_trim, strip_offset_token
+from .trim import DEFAULT_TRIGGERS, maybe_trim, strip_offset_token
 
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+
+_trigger_desc = " or ".join(f"“{t}”" for t in DEFAULT_TRIGGERS)
 
 APP_DESCRIPTION = (
     "Automates adding a lead-in “frontmatter” video (e.g. a logo) to the front "
     "of a Zoom-recorded meeting video (both MP4). If a Zoom chat log with the same "
-    f"base name is found next to a video, it looks for a chat line “{DEFAULT_TRIGGER}” "
+    f"base name is found next to a video, it looks for a chat line containing {_trigger_desc} "
     "(case-insensitive) and trims the start of the video to that point before prepending the "
     "frontmatter. Processes as many files as you add, in one batch."
 )
@@ -121,7 +123,7 @@ class FrontmatterGUI:
 
         ttk.Checkbutton(
             settings_frame,
-            text=f'Auto-trim lead-in when a chat log with "{DEFAULT_TRIGGER}" is found next to a video',
+            text=f'Auto-trim lead-in when a chat log with {_trigger_desc} is found next to a video',
             variable=self.auto_trim,
             command=self._save_settings,
         ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(4, 0))
@@ -273,7 +275,7 @@ class FrontmatterGUI:
 
             with tempfile.TemporaryDirectory() as tmp:
                 if auto_trim:
-                    working_video, trim_msg, offset_seconds = maybe_trim(ffmpeg_path, video, Path(tmp), DEFAULT_TRIGGER)
+                    working_video, trim_msg, offset_seconds = maybe_trim(ffmpeg_path, video, Path(tmp), DEFAULT_TRIGGERS)
                 else:
                     working_video, trim_msg, offset_seconds = video, "trimming disabled", None
                 self.result_queue.put((video.name, f"trim: {trim_msg}", False))
