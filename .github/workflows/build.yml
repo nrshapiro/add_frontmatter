@@ -47,8 +47,27 @@ jobs:
             exit 1
           fi
 
+  # Fast regression check against tests/fixtures/ -- runs on every push
+  # (not just a tag push), independent of and before the slow Windows/Mac
+  # exe builds, so a logic bug (e.g. the marker-matching or offset-timing
+  # bugs from 2026-10-22) gets caught here rather than being noticed only
+  # after someone downloads and runs the built exe on a real meeting.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run tests
+        run: pytest tests/ -v
+
   build-cli-windows:
-    needs: check-version
+    needs: [check-version, test]
     runs-on: windows-latest
     permissions:
       contents: write  # needed for the "Attach to release" step to upload assets
@@ -109,7 +128,7 @@ jobs:
           files: dist/add-frontmatter.exe
 
   build-gui:
-    needs: check-version
+    needs: [check-version, test]
     strategy:
       fail-fast: false
       matrix:
