@@ -1,0 +1,3 @@
+00:00:01	Alice Example:	hi everyone, getting set up
+00:00:02	Alice Example:	iStart
+00:00:04	Bob Example:	great talk so far

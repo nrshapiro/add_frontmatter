@@ -58,6 +58,30 @@ window, next to the "Add Frontmatter" title — click the version number for
 an About box with the same text. The CLI shows its version too, at the top
 of every run (or on its own via `add-frontmatter --version`).
 
+#### Try it out first — no real recording needed
+
+Before pointing this at an actual meeting video, it's worth running it once
+against the small sample files in [`examples/`](examples/) to see what it
+does and confirm it's working on your machine:
+
+1. Download both files from [`examples/`](examples/):
+   `sample_frontmatter.mp4`, and the two files inside `sample_meeting/`
+   (keep those two together in their own folder — the tool finds the chat
+   log by looking next to the video).
+2. In the app, click **Choose…** next to "Frontmatter video" and pick
+   `sample_frontmatter.mp4`.
+3. Click **Add Files…** and pick the sample recording,
+   `GMT20261023-150000_Recording_160x120.mp4`.
+4. Click **Process**.
+
+The Log panel should show it found the companion chat file, matched the
+`iStart` marker, and trimmed 2 seconds of lead-in before adding the
+frontmatter. The result is a tiny (few-second) output file you can
+actually watch, so you can confirm both halves — the trim and the
+frontmatter — did what they're supposed to before trusting it with a real
+recording. See [`examples/README.md`](examples/README.md) for what each
+sample file is for.
+
 ### Command line (Windows only)
 
 **No Python install needed.** Grab `add-frontmatter.exe` from
