@@ -24,7 +24,31 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  # On a version-tag push, fails the whole workflow (so nothing gets built
+  # or attached to the Release) unless __init__.py's __version__ and
+  # pyproject.toml's version both match the tag. This exists because the
+  # version bump has been forgotten/mismatched more than once (v2.2.2 and
+  # v2.2.3 both shipped exes whose GUI title bar showed the PREVIOUS
+  # version) -- better to catch it here than notice it after downloading
+  # the exe. No-ops on a plain push to main (no tag to check against).
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify __version__ and pyproject.toml match the pushed tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          INIT_VERSION=$(grep -oP '__version__ = "\K[^"]+' src/add_frontmatter/__init__.py)
+          PYPROJECT_VERSION=$(grep -oP '^version = "\K[^"]+' pyproject.toml)
+          echo "Tag: $TAG_VERSION | __init__.py: $INIT_VERSION | pyproject.toml: $PYPROJECT_VERSION"
+          if [ "$TAG_VERSION" != "$INIT_VERSION" ] || [ "$TAG_VERSION" != "$PYPROJECT_VERSION" ]; then
+            echo "::error::Version mismatch: tag is $TAG_VERSION, __init__.py has $INIT_VERSION, pyproject.toml has $PYPROJECT_VERSION. Bump both files to match the tag and re-push."
+            exit 1
+          fi
+
   build-cli-windows:
+    needs: check-version
     runs-on: windows-latest
     permissions:
       contents: write  # needed for the "Attach to release" step to upload assets
@@ -85,6 +109,7 @@ jobs:
           files: dist/add-frontmatter.exe
 
   build-gui:
+    needs: check-version
     strategy:
       fail-fast: false
       matrix:
