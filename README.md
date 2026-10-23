@@ -71,16 +71,17 @@ does and confirm it's working on your machine:
 2. In the app, click **Choose…** next to "Frontmatter video" and pick
    `sample_frontmatter.mp4`.
 3. Click **Add Files…** and pick the sample recording,
-   `GMT20261023-150000_Recording_160x120.mp4`.
+   `GMT20261023-150000_Recording.mp4`.
 4. Click **Process**.
 
 The Log panel should show it found the companion chat file, matched the
 `iStart` marker, and trimmed 2 seconds of lead-in before adding the
-frontmatter. The result is a tiny (few-second) output file you can
-actually watch, so you can confirm both halves — the trim and the
-frontmatter — did what they're supposed to before trusting it with a real
-recording. See [`examples/README.md`](examples/README.md) for what each
-sample file is for.
+frontmatter. Then play the result: it should open on a color-bars
+"SPS OPENING" title card and cut straight to an orange screen already
+reading **T+00:00:02** — not T+00:00:00 — which is the proof that the
+lead-in actually got trimmed, not just that a file got produced. See
+[`examples/README.md`](examples/README.md) for more on what each sample
+file is for.
 
 ### Command line (Windows only)
 
